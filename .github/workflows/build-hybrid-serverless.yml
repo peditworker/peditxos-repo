@@ -90,9 +90,8 @@ jobs:
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           echo "Total configurations found: $TOTAL_JOBS"
           
-          # Calculate split points for 4 parts
           P1=$((TOTAL_JOBS / 4))
-          P2=$((TOTAL_JOBS / 2))
+          P2=$((P1 * 2))
           P3=$((P1 * 3))
 
           MATRIX_PART1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")
@@ -132,11 +131,7 @@ jobs:
       - name: Read Package Versions from File
         id: ver
         run: |
-          echo "Reading package versions from cur_ver.json..."
-          if [ ! -f cur_ver.json ]; then
-            echo "cur_ver.json not found. Creating a default empty file to proceed."
-            echo "{}" > cur_ver.json
-          fi
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -148,21 +143,16 @@ jobs:
       - name: Update feeds and generate config
         working-directory: ./openwrt
         run: |
-          echo "Appending custom feeds with latest versions..."
           cat >> feeds.conf.default << EOF
           src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
           src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # This is the crucial fix: Install ONLY the packages from our custom feeds and luci.
-          # This avoids errors from dozens of broken packages in the base feeds (telephony, etc.).
-          # The -f flag forces installation even if definitions are broken, but we scope it to only what we need.
           ./scripts/feeds install -f -p passwall_packages
           ./scripts/feeds install -f -p passwall_luci
           ./scripts/feeds install -f -p passwall2
           ./scripts/feeds install -f -p luci
-          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -186,6 +176,11 @@ jobs:
       - name: Download all package sources
         working-directory: ./openwrt
         run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
       - name: Build all packages (non-stop)
         working-directory: ./openwrt
         run: |
@@ -193,7 +188,7 @@ jobs:
           make package/index V=s
       - name: Organize packages for artifact upload
         run: |
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
@@ -237,11 +232,7 @@ jobs:
       - name: Read Package Versions from File
         id: ver
         run: |
-          echo "Reading package versions from cur_ver.json..."
-          if [ ! -f cur_ver.json ]; then
-            echo "cur_ver.json not found. Creating a default empty file to proceed."
-            echo "{}" > cur_ver.json
-          fi
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -253,7 +244,6 @@ jobs:
       - name: Update feeds and generate config
         working-directory: ./openwrt
         run: |
-          echo "Appending custom feeds with latest versions..."
           cat >> feeds.conf.default << EOF
           src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
           src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
@@ -264,7 +254,6 @@ jobs:
           ./scripts/feeds install -f -p passwall_luci
           ./scripts/feeds install -f -p passwall2
           ./scripts/feeds install -f -p luci
-          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -288,6 +277,11 @@ jobs:
       - name: Download all package sources
         working-directory: ./openwrt
         run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
       - name: Build all packages (non-stop)
         working-directory: ./openwrt
         run: |
@@ -295,7 +289,7 @@ jobs:
           make package/index V=s
       - name: Organize packages for artifact upload
         run: |
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
@@ -339,11 +333,7 @@ jobs:
       - name: Read Package Versions from File
         id: ver
         run: |
-          echo "Reading package versions from cur_ver.json..."
-          if [ ! -f cur_ver.json ]; then
-            echo "cur_ver.json not found. Creating a default empty file to proceed."
-            echo "{}" > cur_ver.json
-          fi
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -355,7 +345,6 @@ jobs:
       - name: Update feeds and generate config
         working-directory: ./openwrt
         run: |
-          echo "Appending custom feeds with latest versions..."
           cat >> feeds.conf.default << EOF
           src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
           src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
@@ -366,7 +355,6 @@ jobs:
           ./scripts/feeds install -f -p passwall_luci
           ./scripts/feeds install -f -p passwall2
           ./scripts/feeds install -f -p luci
-          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -390,6 +378,11 @@ jobs:
       - name: Download all package sources
         working-directory: ./openwrt
         run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
       - name: Build all packages (non-stop)
         working-directory: ./openwrt
         run: |
@@ -397,7 +390,7 @@ jobs:
           make package/index V=s
       - name: Organize packages for artifact upload
         run: |
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
@@ -441,11 +434,7 @@ jobs:
       - name: Read Package Versions from File
         id: ver
         run: |
-          echo "Reading package versions from cur_ver.json..."
-          if [ ! -f cur_ver.json ]; then
-            echo "cur_ver.json not found. Creating a default empty file to proceed."
-            echo "{}" > cur_ver.json
-          fi
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -457,7 +446,6 @@ jobs:
       - name: Update feeds and generate config
         working-directory: ./openwrt
         run: |
-          echo "Appending custom feeds with latest versions..."
           cat >> feeds.conf.default << EOF
           src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
           src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
@@ -468,7 +456,6 @@ jobs:
           ./scripts/feeds install -f -p passwall_luci
           ./scripts/feeds install -f -p passwall2
           ./scripts/feeds install -f -p luci
-          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -492,6 +479,11 @@ jobs:
       - name: Download all package sources
         working-directory: ./openwrt
         run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
       - name: Build all packages (non-stop)
         working-directory: ./openwrt
         run: |
@@ -499,7 +491,7 @@ jobs:
           make package/index V=s
       - name: Organize packages for artifact upload
         run: |
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
@@ -533,17 +525,13 @@ jobs:
         run: |
           cd dist
           # This script will generate an index.html for each directory, allowing for easy browsing.
-          echo "Generating recursive index pages..."
           find . -type d -exec bash -c '
             cd "$0"
             echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title></head><body><h1>Index of $(pwd)</h1><hr><pre>" > index.html
             echo "<a href=\"../\">../</a>" >> index.html
             for item in *; do
-              if [ -d "$item" ]; then
-                echo "<a href=\"$item/\">$item/</a>" >> index.html
-              else
-                echo "<a href=\"$item\">$item</a>" >> index.html
-              fi
+              if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+              else echo "<a href=\"$item\">$item</a>" >> index.html; fi
             done
             echo "</pre><hr></body></html>"
           ' {} \;
