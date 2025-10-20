@@ -20,6 +20,29 @@ on:
       - 'cur_ver.json'
 
 jobs:
+  # ======================================================================================
+  # TEMPORARY JOB: Run this ONCE to generate your private key.
+  # After you create the secret, DELETE this entire 'generate_key' job.
+  # ======================================================================================
+  generate_key:
+    name: "!!! STEP 1: GENERATE PRIVATE KEY !!!"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install usign tool
+        run: sudo apt-get update && sudo apt-get install -y usign
+
+      - name: Generate usign key pair
+        run: usign -G -s key-build
+
+      - name: Display Base64 encoded private key for secret
+        run: |
+          echo "✅ Key generation successful!"
+          echo "👇 COPY the entire block of text below and save it as the USIGN_PRIVATE_KEY secret in your repository settings 👇"
+          echo "============================================================================================================"
+          base64 key-build
+          echo "============================================================================================================"
+          echo "After creating the secret, REMOVE this 'generate_key' job from your workflow file."
+
   # Job 1: Dynamically generate the build matrix for each version
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
