@@ -2,486 +2,510 @@
 # FINAL, STABLE - OpenWrt Package Repository Builder - "Download Once, Build Many" Architecture
 #
 # This workflow uses the correct, robust, multi-stage process to prevent DDoS errors:
-#   1. SETUP: A single matrix job clones each OpenWrt version ONCE, adds all feeds,
-#      and caches the entire prepared source tree.
-#   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache instead of
-#      re-cloning, preventing GitHub rate-limiting and dramatically speeding up the process.
+#   1. SETUP: A single matrix job clones each OpenWrt version ONCE, adds all feeds,
+#     and caches the entire prepared source tree.
+#   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache instead of
+#     re-cloning, preventing GitHub rate-limiting and dramatically speeding up the process.
 # ======================================================================================
 
 name: Build and Deploy Hybrid OpenWrt Packages (Serverless)
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
-  push:
-    paths:
-      - 'cur_ver.json'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
+  push:
+    paths:
+      - 'cur_ver.json'
 
 jobs:
-  # Job 1: Setup a cached source tree for EACH OpenWrt version to avoid DDoS-like behavior.
-  setup_source:
-    name: Setup Source for OpenWrt ${{ matrix.ref }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ref:
-          - 'main'
-          - 'openwrt-24.10'
-          - 'openwrt-23.05'
-          - 'openwrt-22.03'
-    steps:
-      - name: Checkout main repository code
-        uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Read Package Versions from File
-        id: ver
-        run: |
-          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
-      - name: Clone OpenWrt source code
-        run: git clone --depth 1 --branch ${{ matrix.ref }} https://github.com/openwrt/openwrt.git openwrt
-      - name: Clone custom single packages
-        run: |
-          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git openwrt/package/luci-app-themeswitch
-          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
-          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
-      - name: Update feeds
-        working-directory: ./openwrt
-        run: |
-          cat >> feeds.conf.default << EOF
-          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
-          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
-          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
-          EOF
-          ./scripts/feeds update -a
-      - name: Cache the entire prepared OpenWrt source directory
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.ref }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.ref }}-
+  # Job 1: Setup a cached source tree for EACH OpenWrt version to avoid DDoS-like behavior.
+  setup_source:
+    name: Setup Source for OpenWrt ${{ matrix.ref }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - 'main'
+          - 'openwrt-24.10'
+          - 'openwrt-23.05'
+          - 'openwrt-22.03'
+    steps:
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Read Package Versions from File (Latest Defaults)
+        id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          # Read default latest versions from cur_ver.json
+          jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
+      - name: Set Compatible Feed Versions
+        id: feeds
+        run: |
+          OWRT_VERSION="${{ matrix.ref }}"
+          # Initialize feed versions with the latest defaults from cur_ver.json
+          PASSWALL_PKGS="${{ steps.ver.outputs.packages }}"
+          PASSWALL_LUCI="${{ steps.ver.outputs.passwall }}"
+          PASSWALL2_LUCI="${{ steps.ver.outputs.passwall2 }}"
 
-  # Job 2: Dynamically generate the build matrix for each version
-  generate_matrix:
-    name: Generate Build Matrix
-    runs-on: ubuntu-latest
-    needs: setup_source
-    outputs:
-      targets: ${{ steps.out.outputs.targets }}
-    strategy:
-      fail-fast: false
-      matrix:
-        ref:
-          - 'main'
-          - 'openwrt-24.10'
-          - 'openwrt-23.05'
-          - 'openwrt-22.03'
-    steps:
-      - name: Restore source from cache to find targets
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.ref }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.ref }}-
-      - name: Set target/subtarget list
-        id: find_targets
-        working-directory: ./openwrt
-        run: |
-          REF=${{ matrix.ref }}
-          JSON='['
-          FIRST=1
-          while read -r line; do
-            [ -z "$line" ] && continue
-            TARGET_PAIR=$(echo "$line" | sed 's/"/\\"/g')
-            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
-            FIRST=0
-            JSON="$JSON"'{"target_subtarget":"'"$TARGET_PAIR"'","openwrt_version":"'"$REF"'"}'
-          done <<< $(perl ./scripts/dump-target-info.pl targets 2>/dev/null)
-          JSON="$JSON"']'
-          echo "targets=$JSON" >> "$GITHUB_OUTPUT"
-      - name: Store matrix output
-        uses: cloudposse/github-action-matrix-outputs-write@main
-        id: out
-        with:
-          matrix-step-name: ${{ github.job }}
-          matrix-key: ${{ matrix.ref }}
-          outputs: |-
-            targets: ${{ steps.find_targets.outputs.targets }}
+          # --- CRITICAL FIX: Override for older OpenWrt versions ---
+          if [[ "$OWRT_VERSION" == "openwrt-22.03" ]]; then
+            echo "Using legacy feed branches for 22.03 compatibility to fix compilation errors."
+            # IMPORTANT: The user MUST replace these placeholder tags with actual branches/tags
+            # that are confirmed to work with OpenWrt 22.03.
+            PASSWALL_PKGS="v1.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
+            PASSWALL_LUCI="v3.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
+            PASSWALL2_LUCI="v4.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
+          fi
 
-  # Job 3: Gather and split the combined matrix into four parts
-  split_matrix:
-    name: Split Build Matrix
-    runs-on: ubuntu-latest
-    needs: generate_matrix
-    outputs:
-      matrix_part1: ${{ steps.split.outputs.matrix_part1 }}
-      matrix_part2: ${{ steps.split.outputs.matrix_part2 }}
-      matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
-      matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
-    steps:
-      - name: Read all matrix outputs
-        id: read
-        uses: cloudposse/github-action-matrix-outputs-read@main
-        with:
-          matrix-step-name: generate_matrix
-      - name: Combine and Split Matrix
-        id: split
-        run: |
-          COMBINED_MATRIX=$(jq -c '[.[] | .targets | select(. != null and . != "") | fromjson] | flatten' <<< '${{ steps.read.outputs.result }}')
-          TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
-          P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
-          echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
-          echo "matrix_part2=$(echo "$COMBINED_MATRIX" | jq -c ".[${P1}:${P2}]")" >> $GITHUB_OUTPUT
-          echo "matrix_part3=$(echo "$COMBINED_MATRIX" | jq -c ".[${P2}:${P3}]")" >> $GITHUB_OUTPUT
-          echo "matrix_part4=$(echo "$COMBINED_MATRIX" | jq -c ".[${P3}:]")" >> $GITHUB_OUTPUT
+          echo "packages=$PASSWALL_PKGS" >> $GITHUB_OUTPUT
+          echo "passwall=$PASSWALL_LUCI" >> $GITHUB_OUTPUT
+          echo "passwall2=$PASSWALL2_LUCI" >> $GITHUB_OUTPUT
+      - name: Clone OpenWrt source code
+        run: git clone --depth 1 --branch ${{ matrix.ref }} https://github.com/openwrt/openwrt.git openwrt
+      - name: Clone custom single packages
+        run: |
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git openwrt/package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
+      - name: Update feeds
+        working-directory: ./openwrt
+        run: |
+          # Use the version selected in the 'Set Compatible Feed Versions' step
+          cat >> feeds.conf.default << EOF
+          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.feeds.outputs.packages }}
+          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.feeds.outputs.passwall }}
+          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.feeds.outputs.passwall2 }}
+          EOF
+          ./scripts/feeds update -a
+      - name: Cache the entire prepared OpenWrt source directory
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.ref }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.ref }}-
 
-  # Job 4, Part 1: Build the first quarter of the matrix
-  build_part1:
-    name: Build Part 1 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
-    runs-on: ubuntu-latest
-    needs: split_matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part1) }}
-    steps:
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
-      - name: Restore entire OpenWrt source from cache
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
-      - name: Install feeds and generate config
-        working-directory: ./openwrt
-        run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          cat > .config << EOF
-          CONFIG_TARGET_${TARGET}=y
-          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
-          CONFIG_ALL_MODULES=y
-          CONFIG_PACKAGE_luci=y
-          CONFIG_SIGNED_PACKAGES=y
-          EOF
-          make defconfig
-      - name: Decode package signing key
-        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
-      - name: Download all package sources
-        working-directory: ./openwrt
-        run: make download -j$(nproc) V=s
-      - name: Build prerequisites (tools and toolchain)
-        working-directory: ./openwrt
-        run: |
-          make tools/install -j$(nproc) V=s
-          make toolchain/install -j$(nproc) V=s
-      - name: Build all packages (non-stop)
-        working-directory: ./openwrt
-        run: |
-          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
-          make package/index V=s
-      - name: Organize packages for artifact upload
-        run: |
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
-          mkdir -p "${ARTIFACT_DIR}/packages"
-          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
-          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
-          if [ -f "openwrt/key-build.pub" ]; then
-            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
-          fi
-      - name: Upload artifact for deployment
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-part1-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
-          path: dist
-          retention-days: 1
+  # Job 2: Dynamically generate the build matrix for each version
+  generate_matrix:
+    name: Generate Build Matrix
+    runs-on: ubuntu-latest
+    needs: setup_source
+    outputs:
+      targets: ${{ steps.out.outputs.targets }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - 'main'
+          - 'openwrt-24.10'
+          - 'openwrt-23.05'
+          - 'openwrt-22.03'
+    steps:
+      - name: Restore source from cache to find targets
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.ref }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.ref }}-
+      - name: Set target/subtarget list
+        id: find_targets
+        working-directory: ./openwrt
+        run: |
+          REF=${{ matrix.ref }}
+          JSON='['
+          FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            TARGET_PAIR=$(echo "$line" | sed 's/"/\\"/g')
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0
+            JSON="$JSON"'{"target_subtarget":"'"$TARGET_PAIR"'","openwrt_version":"'"$REF"'"}'
+          done <<< $(perl ./scripts/dump-target-info.pl targets 2>/dev/null)
+          JSON="$JSON"']'
+          echo "targets=$JSON" >> "$GITHUB_OUTPUT"
+      - name: Store matrix output
+        uses: cloudposse/github-action-matrix-outputs-write@main
+        id: out
+        with:
+          matrix-step-name: ${{ github.job }}
+          matrix-key: ${{ matrix.ref }}
+          outputs: |-
+            targets: ${{ steps.find_targets.outputs.targets }}
 
-  # Job 4, Part 2: Build the second quarter of the matrix
-  build_part2:
-    name: Build Part 2 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
-    runs-on: ubuntu-latest
-    needs: split_matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part2) }}
-    steps:
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
-      - name: Restore entire OpenWrt source from cache
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
-      - name: Install feeds and generate config
-        working-directory: ./openwrt
-        run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          cat > .config << EOF
-          CONFIG_TARGET_${TARGET}=y
-          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
-          CONFIG_ALL_MODULES=y
-          CONFIG_PACKAGE_luci=y
-          CONFIG_SIGNED_PACKAGES=y
-          EOF
-          make defconfig
-      - name: Decode package signing key
-        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
-      - name: Download all package sources
-        working-directory: ./openwrt
-        run: make download -j$(nproc) V=s
-      - name: Build prerequisites (tools and toolchain)
-        working-directory: ./openwrt
-        run: |
-          make tools/install -j$(nproc) V=s
-          make toolchain/install -j$(nproc) V=s
-      - name: Build all packages (non-stop)
-        working-directory: ./openwrt
-        run: |
-          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
-          make package/index V=s
-      - name: Organize packages for artifact upload
-        run: |
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
-          mkdir -p "${ARTIFACT_DIR}/packages"
-          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
-          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
-          if [ -f "openwrt/key-build.pub" ]; then
-            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
-          fi
-      - name: Upload artifact for deployment
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-part2-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
-          path: dist
-          retention-days: 1
+  # Job 3: Gather and split the combined matrix into four parts
+  split_matrix:
+    name: Split Build Matrix
+    runs-on: ubuntu-latest
+    needs: generate_matrix
+    outputs:
+      matrix_part1: ${{ steps.split.outputs.matrix_part1 }}
+      matrix_part2: ${{ steps.split.outputs.matrix_part2 }}
+      matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
+      matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
+    steps:
+      - name: Read all matrix outputs
+        id: read
+        uses: cloudposse/github-action-matrix-outputs-read@main
+        with:
+          matrix-step-name: generate_matrix
+      - name: Combine and Split Matrix
+        id: split
+        run: |
+          # This is the crucial fix: The new jq command correctly handles potentially null/empty values before parsing.
+          COMBINED_MATRIX=$(jq -c '[.[] | .targets | select(. != null and . != "") | fromjson] | flatten' <<< '${{ steps.read.outputs.result }}')
+          TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
+          P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
+          echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
+          echo "matrix_part2=$(echo "$COMBINED_MATRIX" | jq -c ".[${P1}:${P2}]")" >> $GITHUB_OUTPUT
+          echo "matrix_part3=$(echo "$COMBINED_MATRIX" | jq -c ".[${P2}:${P3}]")" >> $GITHUB_OUTPUT
+          echo "matrix_part4=$(echo "$COMBINED_MATRIX" | jq -c ".[${P3}:]")" >> $GITHUB_OUTPUT
 
-  # Job 4, Part 3: Build the third quarter of the matrix
-  build_part3:
-    name: Build Part 3 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
-    runs-on: ubuntu-latest
-    needs: split_matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part3) }}
-    steps:
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
-      - name: Restore entire OpenWrt source from cache
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
-      - name: Install feeds and generate config
-        working-directory: ./openwrt
-        run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          cat > .config << EOF
-          CONFIG_TARGET_${TARGET}=y
-          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
-          CONFIG_ALL_MODULES=y
-          CONFIG_PACKAGE_luci=y
-          CONFIG_SIGNED_PACKAGES=y
-          EOF
-          make defconfig
-      - name: Decode package signing key
-        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
-      - name: Download all package sources
-        working-directory: ./openwrt
-        run: make download -j$(nproc) V=s
-      - name: Build prerequisites (tools and toolchain)
-        working-directory: ./openwrt
-        run: |
-          make tools/install -j$(nproc) V=s
-          make toolchain/install -j$(nproc) V=s
-      - name: Build all packages (non-stop)
-        working-directory: ./openwrt
-        run: |
-          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
-          make package/index V=s
-      - name: Organize packages for artifact upload
-        run: |
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
-          mkdir -p "${ARTIFACT_DIR}/packages"
-          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
-          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
-          if [ -f "openwrt/key-build.pub" ]; then
-            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
-          fi
-      - name: Upload artifact for deployment
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-part3-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
-          path: dist
-          retention-days: 1
+  # Job 4, Part 1: Build the first quarter of the matrix
+  build_part1:
+    name: Build Part 1 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part1) }}
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
+      - name: Restore entire OpenWrt source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.openwrt_version }}-
+      - name: Install feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Decode package signing key
+        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part1-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
 
-  # Job 4, Part 4: Build the final quarter of the matrix
-  build_part4:
-    name: Build Part 4 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
-    runs-on: ubuntu-latest
-    needs: split_matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part4) }}
-    steps:
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
-      - name: Restore entire OpenWrt source from cache
-        uses: actions/cache@v4
-        with:
-          path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
-      - name: Install feeds and generate config
-        working-directory: ./openwrt
-        run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          cat > .config << EOF
-          CONFIG_TARGET_${TARGET}=y
-          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
-          CONFIG_ALL_MODULES=y
-          CONFIG_PACKAGE_luci=y
-          CONFIG_SIGNED_PACKAGES=y
-          EOF
-          make defconfig
-      - name: Decode package signing key
-        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
-      - name: Download all package sources
-        working-directory: ./openwrt
-        run: make download -j$(nproc) V=s
-      - name: Build prerequisites (tools and toolchain)
-        working-directory: ./openwrt
-        run: |
-          make tools/install -j$(nproc) V=s
-          make toolchain/install -j$(nproc) V=s
-      - name: Build all packages (non-stop)
-        working-directory: ./openwrt
-        run: |
-          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
-          make package/index V=s
-      - name: Organize packages for artifact upload
-        run: |
-          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
-          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
-          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
-          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
-          mkdir -p "${ARTIFACT_DIR}/packages"
-          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
-          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
-          if [ -f "openwrt/key-build.pub" ]; then
-            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
-          fi
-      - name: Upload artifact for deployment
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-part4-${{ matrix.openwt_version }}-${{ matrix.target_subtarget }}
-          path: dist
-          retention-days: 1
+  # Job 4, Part 2: Build the second quarter of the matrix
+  build_part2:
+    name: Build Part 2 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part2) }}
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
+      - name: Restore entire OpenWrt source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.openwrt_version }}-
+      - name: Install feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Decode package signing key
+        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part2-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
 
-  # Job 5: The final deployment job
-  deploy:
-    needs: [build_part1, build_part2, build_part3, build_part4]
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all built packages
-        uses: actions/download-artifact@v4
-        with:
-          path: ./dist
-          pattern: packages-part*
-          merge-multiple: true
-      - name: Create repository index pages
-        run: |
-          cd dist
-          find . -type d -exec bash -c '
-            cd "$0"
-            echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title></head><body><h1>Index of $(pwd)</h1><hr><pre><a href=\"../\">../</a>" > index.html
-            for item in *; do
-              if [ "$item" != "index.html" ]; then
-                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
-                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
-              fi
-            done
-            echo "</pre><hr></body></html>"
-          ' {} \;
-          echo '<!DOCTYPE html><html><head><title>PeDitXOS Repository</title><style>body{font-family: sans-serif; padding: 2em;}</style></head><body><h1>PeDitXOS Repository</h1><h2>Available OpenWrt Versions:</h2><ul>' > index.html
-          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' | sort); do
-            version_name=$(basename "$dir")
-            echo "<li><a href=\"$version_name/\">$version_name</a></li>" >> index.html
-          done
-          echo '</ul>' >> index.html
-          find . -maxdepth 2 -name 'key-build-*.pub' -print -exec cp {} ./key-build.pub \; -quit
-          if [ -f "./key-build.pub" ]; then
-            echo '<h3>Public Signing Key: <a href="key-build.pub">key-build.pub</a></h3>' >> index.html
-          fi
-          echo '</body></html>'
-      - name: Push updates to repository
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          deploy_key: ${{ secrets.DEPLOY_KEY }}
-          external_repository: peditx/PeDitXOS-Repository
-          publish_dir: ./dist
-          publish_branch: repo
-          force_orphan: true
-          cname: downloads.peditxos.ir
-          user_name: 'peditworker'
-          user_email: 'pedram.ale@me.com'
+  # Job 4, Part 3: Build the third quarter of the matrix
+  build_part3:
+    name: Build Part 3 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part3) }}
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
+      - name: Restore entire OpenWrt source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.openwrt_version }}-
+      - name: Install feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Decode package signing key
+        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part3-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
 
+  # Job 4, Part 4: Build the final quarter of the matrix
+  build_part4:
+    name: Build Part 4 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part4) }}
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with: { root-reserve-mb: 512, swap-size-mb: 1024, remove-dotnet: 'true', remove-android: 'true', remove-haskell: 'true' }
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y subversion libncurses-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq ninja-build
+      - name: Restore entire OpenWrt source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
+          restore-keys: |
+            src-${{ matrix.openwrt_version }}-
+      - name: Install feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Decode package signing key
+        run: echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem && echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build prerequisites (tools and toolchain)
+        working-directory: ./openwrt
+        run: |
+          make tools/install -j$(nproc) V=s
+          make toolchain/install -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part4-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
+
+  # Job 5: The final deployment job
+  deploy:
+    needs: [build_part1, build_part2, build_part3, build_part4]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+          pattern: packages-part*
+          merge-multiple: true
+      - name: Create repository index pages
+        run: |
+          cd dist
+          find . -type d -exec bash -c '
+            cd "$0"
+            echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title></head><body><h1>Index of $(pwd)</h1><hr><pre><a href=\"../\">../</a>" > index.html
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            echo "</pre><hr></body></html>"
+          ' {} \;
+          echo '<!DOCTYPE html><html><head><title>PeDitXOS Repository</title><style>body{font-family: sans-serif; padding: 2em;}</style></head><body><h1>PeDitXOS Repository</h1><h2>Available OpenWrt Versions:</h2><ul>' > index.html
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' | sort); do
+            version_name=$(basename "$dir")
+            echo "<li><a href=\"$version_name/\">$version_name</a></li>" >> index.html
+          done
+          echo '</ul>' >> index.html
+          find . -maxdepth 2 -name 'key-build-*.pub' -print -exec cp {} ./key-build.pub \; -quit
+          if [ -f "./key-build.pub" ]; then
+            echo '<h3>Public Signing Key: <a href="key-build.pub">key-build.pub</a></h3>' >> index.html
+          fi
+          echo '</body></html>'
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
