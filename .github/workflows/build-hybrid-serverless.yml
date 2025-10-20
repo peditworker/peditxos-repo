@@ -155,7 +155,9 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
+          # This allows the process to continue and build everything else that is valid.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
@@ -255,7 +257,9 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
+          # This allows the process to continue and build everything else that is valid.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
@@ -355,7 +359,9 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
+          # This allows the process to continue and build everything else that is valid.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
@@ -455,7 +461,9 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
+          # This allows the process to continue and build everything else that is valid.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
