@@ -1,9 +1,9 @@
 # ======================================================================================
-# COMPLETE OpenWrt Package Repository Builder - DYNAMIC HYBRID SERVERLESS Version
+# COMPLETE OpenWrt Package Repository Builder - 4x Parallel DYNAMIC HYBRID SERVERLESS Version
 #
 # This workflow combines the best of both worlds:
 #   - Dynamically discovers all available build targets for each OpenWrt version.
-#   - Splits the build matrix into multiple jobs to stay within GitHub's 256 limit.
+#   - Splits the build matrix into 4 parallel jobs to stay within GitHub's 256 limit and increase speed.
 #   - Builds from the full OpenWrt source for maximum compatibility.
 #   - Reads external package versions from a central 'cur_ver.json' file.
 #   - Deploys the final repository to a separate GitHub repository (serverless).
@@ -66,14 +66,16 @@ jobs:
           outputs: |-
             targets: ${{ steps.find_targets.outputs.targets }}
 
-  # Job 2: Gather and split the combined matrix into two halves
+  # Job 2: Gather and split the combined matrix into four parts
   split_matrix:
-    name: Split Build Matrix
+    name: Split Build Matrix into 4 parts
     runs-on: ubuntu-latest
     needs: generate_matrix
     outputs:
       matrix_part1: ${{ steps.split.outputs.matrix_part1 }}
       matrix_part2: ${{ steps.split.outputs.matrix_part2 }}
+      matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
+      matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
     steps:
       - name: Read all matrix outputs
         id: read
@@ -87,13 +89,23 @@ jobs:
           COMBINED_MATRIX=$(jq -c '.targets[]' <<< '${{ steps.read.outputs.result }}' | jq -c -s add)
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           echo "Total configurations found: $TOTAL_JOBS"
-          SPLIT_POINT=$((TOTAL_JOBS / 2))
-          MATRIX_PART1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${SPLIT_POINT}]")
-          MATRIX_PART2=$(echo "$COMBINED_MATRIX" | jq -c ".[${SPLIT_POINT}:]")
+          
+          # Calculate split points for 4 parts
+          P1=$((TOTAL_JOBS / 4))
+          P2=$((TOTAL_JOBS / 2))
+          P3=$((P1 * 3))
+
+          MATRIX_PART1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")
+          MATRIX_PART2=$(echo "$COMBINED_MATRIX" | jq -c ".[${P1}:${P2}]")
+          MATRIX_PART3=$(echo "$COMBINED_MATRIX" | jq -c ".[${P2}:${P3}]")
+          MATRIX_PART4=$(echo "$COMBINED_MATRIX" | jq -c ".[${P3}:]")
+
           echo "matrix_part1=$MATRIX_PART1" >> $GITHUB_OUTPUT
           echo "matrix_part2=$MATRIX_PART2" >> $GITHUB_OUTPUT
+          echo "matrix_part3=$MATRIX_PART3" >> $GITHUB_OUTPUT
+          echo "matrix_part4=$MATRIX_PART4" >> $GITHUB_OUTPUT
 
-  # Job 3, Part 1: Build the first half of the matrix
+  # Job 3, Part 1: Build the first quarter of the matrix
   build_part1:
     name: Build Part 1 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
     runs-on: ubuntu-latest
@@ -121,8 +133,6 @@ jobs:
         id: ver
         run: |
           echo "Reading package versions from cur_ver.json..."
-          # If cur_ver.json doesn't exist (e.g., on first run), create an empty one to prevent failure.
-          # The build will proceed using the latest commit from the feeds.
           if [ ! -f cur_ver.json ]; then
             echo "cur_ver.json not found. Creating a default empty file to proceed."
             echo "{}" > cur_ver.json
@@ -194,7 +204,7 @@ jobs:
           path: dist
           retention-days: 1
 
-  # Job 3, Part 2: Build the second half of the matrix
+  # Job 3, Part 2: Build the second quarter of the matrix
   build_part2:
     name: Build Part 2 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
     runs-on: ubuntu-latest
@@ -222,8 +232,6 @@ jobs:
         id: ver
         run: |
           echo "Reading package versions from cur_ver.json..."
-          # If cur_ver.json doesn't exist (e.g., on first run), create an empty one to prevent failure.
-          # The build will proceed using the latest commit from the feeds.
           if [ ! -f cur_ver.json ]; then
             echo "cur_ver.json not found. Creating a default empty file to proceed."
             echo "{}" > cur_ver.json
@@ -295,9 +303,207 @@ jobs:
           path: dist
           retention-days: 1
 
+  # Job 3, Part 3: Build the third quarter of the matrix
+  build_part3:
+    name: Build Part 3 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part3) }}
+    steps:
+      - name: Checkout main repository code (for config files)
+        uses: actions/checkout@v4
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y subversion libncurses5-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq
+      - name: Read Package Versions from File
+        id: ver
+        run: |
+          echo "Reading package versions from cur_ver.json..."
+          if [ ! -f cur_ver.json ]; then
+            echo "cur_ver.json not found. Creating a default empty file to proceed."
+            echo "{}" > cur_ver.json
+          fi
+          jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
+      - name: Clone OpenWrt source code
+        run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
+      - name: Clone custom single packages
+        run: |
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git openwrt/package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
+      - name: Update feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          echo "Appending custom feeds with latest versions..."
+          cat >> feeds.conf.default << EOF
+          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
+          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
+          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
+          EOF
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
+          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Cache OpenWrt Downloads
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-${{ matrix.openwrt_version }}-dl-${{ hashFiles('openwrt/feeds.conf.default', '**/Makefile') }}
+      - name: Decode package signing key
+        run: |
+          echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem
+          echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part3-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
+
+  # Job 3, Part 4: Build the final quarter of the matrix
+  build_part4:
+    name: Build Part 4 - ${{ matrix.target_subtarget }} for ${{ matrix.openwrt_version }}
+    runs-on: ubuntu-latest
+    needs: split_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.split_matrix.outputs.matrix_part4) }}
+    steps:
+      - name: Checkout main repository code (for config files)
+        uses: actions/checkout@v4
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y subversion libncurses5-dev gawk zlib1g-dev python3-dev python3-setuptools unzip wget libtool python3-pip jq
+      - name: Read Package Versions from File
+        id: ver
+        run: |
+          echo "Reading package versions from cur_ver.json..."
+          if [ ! -f cur_ver.json ]; then
+            echo "cur_ver.json not found. Creating a default empty file to proceed."
+            echo "{}" > cur_ver.json
+          fi
+          jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
+      - name: Clone OpenWrt source code
+        run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
+      - name: Clone custom single packages
+        run: |
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git openwrt/package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
+      - name: Update feeds and generate config
+        working-directory: ./openwrt
+        run: |
+          echo "Appending custom feeds with latest versions..."
+          cat >> feeds.conf.default << EOF
+          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
+          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
+          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
+          EOF
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
+          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          cat > .config << EOF
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_ALL_MODULES=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_SIGNED_PACKAGES=y
+          EOF
+          make defconfig
+      - name: Cache OpenWrt Downloads
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: ${{ runner.os }}-${{ matrix.openwrt_version }}-dl-${{ hashFiles('openwrt/feeds.conf.default', '**/Makefile') }}
+      - name: Decode package signing key
+        run: |
+          echo "${{ secrets.USIGN_PRIVATE_KEY }}" | base64 -d > openwrt/signing_key.pem
+          echo "CONFIG_SIGNATURE_KEY=\"signing_key.pem\"" >> openwrt/.config
+      - name: Download all package sources
+        working-directory: ./openwrt
+        run: make download -j$(nproc) V=s
+      - name: Build all packages (non-stop)
+        working-directory: ./openwrt
+        run: |
+          make package/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make package/index V=s
+      - name: Organize packages for artifact upload
+        run: |
+          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
+          SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
+          ARTIFACT_DIR="dist/${{ matrix.openwrt_version }}/${TARGET}/${SUBTARGET}"
+          mkdir -p "${ARTIFACT_DIR}/packages"
+          find openwrt/bin/packages -type f -name "*.ipk" -exec cp {} "${ARTIFACT_DIR}/packages/" \;
+          find openwrt/bin/targets -path "*${TARGET}/${SUBTARGET}*" -name "Packages*" -exec cp {} "${ARTIFACT_DIR}/" \;
+          if [ -f "openwrt/key-build.pub" ]; then
+            cp openwrt/key-build.pub "dist/key-build-${{ matrix.openwrt_version }}.pub"
+          fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part4-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          path: dist
+          retention-days: 1
+
   # Job 4: The final deployment job
   deploy:
-    needs: [build_part1, build_part2]
+    needs: [build_part1, build_part2, build_part3, build_part4]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
