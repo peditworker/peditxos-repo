@@ -1,11 +1,11 @@
 # ======================================================================================
-# COMPLETE OpenWrt Package Repository Builder - 4x Parallel DYNAMIC HYBRID SERVERLESS Version
+# FINAL - OpenWrt Package Repository Builder - 4x Parallel DYNAMIC HYBRID SERVERLESS Version
 #
-# This workflow combines the best of both worlds:
+# This workflow:
 #   - Dynamically discovers all available build targets for each OpenWrt version.
-#   - Splits the build matrix into 4 parallel jobs to stay within GitHub's 256 limit and increase speed.
-#   - Builds from the full OpenWrt source for maximum compatibility.
-#   - Reads external package versions from a central 'cur_ver.json' file.
+#   - Splits the build matrix into 4 parallel jobs for speed.
+#   - Builds from the full OpenWrt source.
+#   - Reads external package versions from 'cur_ver.json'.
 #   - Deploys the final repository to a separate GitHub repository (serverless).
 # ======================================================================================
 
@@ -20,52 +20,10 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # ======================================================================================
-  # TEMPORARY JOB: Run this ONCE to generate your private key.
-  # After you create the secret, DELETE this entire 'generate_key' job.
-  # ======================================================================================
-  generate_key:
-    name: "!!! STEP 1: GENERATE USIGN PRIVATE KEY !!!"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install build prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git libncurses-dev libssl-dev
-
-      - name: Clone OpenWrt source (for tools only)
-        run: git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt_temp_for_tools
-
-      - name: Compile the 'usign' tool (with Verbose Logging)
-        working-directory: ./openwrt_temp_for_tools
-        run: |
-          # Update and install all default feeds to make sure tool definitions are available.
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          
-          # Generate a default, non-interactive configuration.
-          make defconfig
-          
-          # Now compile the 'usign' tool with high verbosity to find the root cause of any error.
-          make tools/usign/compile V=s
-
-      - name: Generate usign key pair
-        run: ./openwrt_temp_for_tools/staging_dir/host/bin/usign -G -s key-build
-
-      - name: Display Base64 encoded private key for secret
-        run: |
-          echo "✅ Key generation successful!"
-          echo "👇 COPY the entire block of text below and save it as the USIGN_PRIVATE_KEY secret in your repository settings 👇"
-          echo "============================================================================================================"
-          base64 key-build
-          echo "============================================================================================================"
-          echo "After creating the secret, REMOVE this entire 'generate_key' job from your workflow file."
-
   # Job 1: Dynamically generate the build matrix for each version
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    needs: generate_key # Make this job wait for the key generation
     outputs:
       targets: ${{ steps.out.outputs.targets }}
     strategy:
@@ -197,11 +155,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
-          # This allows the process to continue and build everything else that is valid.
           ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -299,11 +254,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
-          # This allows the process to continue and build everything else that is valid.
           ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -401,11 +353,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
-          # This allows the process to continue and build everything else that is valid.
           ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -503,11 +452,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # We use "|| true" to ignore errors from packages that have broken Makefiles or unmet dependencies.
-          # This allows the process to continue and build everything else that is valid.
           ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -551,7 +497,7 @@ jobs:
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
-          name: packages-part4-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          name: packages-part4-${{ matrix.openwt_version }}-${{ matrix.target_subtarget }}
           path: dist
           retention-days: 1
 
