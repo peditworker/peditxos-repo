@@ -146,7 +146,7 @@ jobs:
         id: split
         run: |
           # This is the crucial fix: The new jq command correctly handles potentially null/empty values before parsing.
-          COMBINED_MATRIX=$(jq -c 'fromjson | .[] | .targets | fromjson | select(. != null)' <<< '${{ steps.read.outputs.result }}' | jq -s 'flatten')
+          COMBINED_MATRIX=$(jq -c 'fromjson | .[] | .targets | fromjson? | select(. != null)] | flatten' <<< '${{ steps.read.outputs.result }}' | jq -s 'flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
