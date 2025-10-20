@@ -36,30 +36,53 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Read Package Versions from File (Latest Defaults)
+      - name: Read Package Versions for Main Branch from File
         id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          # Read default latest versions from cur_ver.json
+          # Read default latest versions from cur_ver.json, intended for the 'main' branch
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
-      - name: Set Compatible Feed Versions
+      - name: Set Compatible Feed Versions for Each OpenWrt Release
         id: feeds
         run: |
           OWRT_VERSION="${{ matrix.ref }}"
-          # Initialize feed versions with the latest defaults from cur_ver.json
+          # Default to the latest versions from cur_ver.json (for 'main' branch)
           PASSWALL_PKGS="${{ steps.ver.outputs.packages }}"
           PASSWALL_LUCI="${{ steps.ver.outputs.passwall }}"
           PASSWALL2_LUCI="${{ steps.ver.outputs.passwall2 }}"
 
-          # --- CRITICAL FIX: Override for older OpenWrt versions ---
-          if [[ "$OWRT_VERSION" == "openwrt-22.03" ]]; then
-            echo "Using legacy feed branches for 22.03 compatibility to fix compilation errors."
-            # IMPORTANT: The user MUST replace these placeholder tags with actual branches/tags
-            # that are confirmed to work with OpenWrt 22.03.
-            PASSWALL_PKGS="v1.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
-            PASSWALL_LUCI="v3.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
-            PASSWALL2_LUCI="v4.x-22.03-compatible" # PLACEHOLDER: Find a compatible tag/branch
-          fi
+          # --- CRITICAL FIX: Use specific, known-good feed versions for each OpenWrt release ---
+          # This ensures that each OpenWrt version gets a compatible package version.
+          case "$OWRT_VERSION" in
+            "openwrt-22.03")
+              echo "Using legacy feed branches for 22.03 compatibility."
+              # IMPORTANT: Replace these placeholders with real, compatible tags/branches for 22.03
+              PASSWALL_PKGS="compatible-tag-for-22.03"
+              PASSWALL_LUCI="compatible-tag-for-22.03"
+              PASSWALL2_LUCI="compatible-tag-for-22.03"
+              ;;
+            "openwrt-23.05")
+              echo "Using specific feed branches for 23.05 compatibility."
+              # IMPORTANT: Replace these placeholders with real, compatible tags/branches for 23.05
+              PASSWALL_PKGS="compatible-tag-for-23.05"
+              PASSWALL_LUCI="compatible-tag-for-23.05"
+              PASSWALL2_LUCI="compatible-tag-for-23.05"
+              ;;
+            "openwrt-24.10")
+               echo "Using specific feed branches for 24.10 compatibility."
+              # IMPORTANT: Replace these placeholders with real, compatible tags/branches for 24.10
+              PASSWALL_PKGS="compatible-tag-for-24.10"
+              PASSWALL_LUCI="compatible-tag-for-24.10"
+              PASSWALL2_LUCI="compatible-tag-for-24.10"
+              ;;
+            "main")
+              echo "Using latest feed branches from cur_ver.json for the main branch."
+              # No override needed, the defaults from the 'ver' step are used.
+              ;;
+            *)
+              echo "Warning: No specific feed versions defined for $OWRT_VERSION. Using latest from cur_ver.json as a fallback."
+              ;;
+          esac
 
           echo "packages=$PASSWALL_PKGS" >> $GITHUB_OUTPUT
           echo "passwall=$PASSWALL_LUCI" >> $GITHUB_OUTPUT
@@ -190,10 +213,7 @@ jobs:
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -264,10 +284,7 @@ jobs:
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -338,10 +355,7 @@ jobs:
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -412,10 +426,7 @@ jobs:
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
