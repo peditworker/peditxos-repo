@@ -25,14 +25,23 @@ jobs:
   # After you create the secret, DELETE this entire 'generate_key' job.
   # ======================================================================================
   generate_key:
-    name: "!!! STEP 1: GENERATE PRIVATE KEY !!!"
+    name: "!!! STEP 1: GENERATE USIGN PRIVATE KEY !!!"
     runs-on: ubuntu-latest
     steps:
-      - name: Install usign tool
-        run: sudo apt-get update && sudo apt-get install -y usign
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git libncurses-dev libssl-dev
+
+      - name: Clone OpenWrt source (for tools only)
+        run: git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt_temp_for_tools
+
+      - name: Compile the 'usign' tool
+        working-directory: ./openwrt_temp_for_tools
+        run: make tools/usign/compile
 
       - name: Generate usign key pair
-        run: usign -G -s key-build
+        run: ./openwrt_temp_for_tools/staging_dir/host/bin/usign -G -s key-build
 
       - name: Display Base64 encoded private key for secret
         run: |
@@ -41,12 +50,13 @@ jobs:
           echo "============================================================================================================"
           base64 key-build
           echo "============================================================================================================"
-          echo "After creating the secret, REMOVE this 'generate_key' job from your workflow file."
+          echo "After creating the secret, REMOVE this entire 'generate_key' job from your workflow file."
 
   # Job 1: Dynamically generate the build matrix for each version
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
+    needs: generate_key # Make this job wait for the key generation
     outputs:
       targets: ${{ steps.out.outputs.targets }}
     strategy:
