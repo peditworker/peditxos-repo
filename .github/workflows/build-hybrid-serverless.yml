@@ -38,7 +38,11 @@ jobs:
 
       - name: Compile the 'usign' tool
         working-directory: ./openwrt_temp_for_tools
-        run: make tools/usign/compile
+        run: |
+          # Generate a default, non-interactive configuration to prevent menuconfig from running.
+          make defconfig
+          # Now compile the 'usign' tool
+          make tools/usign/compile
 
       - name: Generate usign key pair
         run: ./openwrt_temp_for_tools/staging_dir/host/bin/usign -G -s key-build
