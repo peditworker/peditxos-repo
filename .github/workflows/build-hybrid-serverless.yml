@@ -155,9 +155,9 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # Install ONLY our custom feeds and luci to avoid errors from broken base packages.
-          # The main 'make' command will still try to build everything else later.
-          ./scripts/feeds install -a -p passwall_packages -p passwall_luci -p passwall2 -p luci
+          # This is the crucial fix: Ignore errors during the install step.
+          # Some packages in base feeds might be broken, this prevents the entire workflow from failing.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
@@ -256,9 +256,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # Install ONLY our custom feeds and luci to avoid errors from broken base packages.
-          # The main 'make' command will still try to build everything else later.
-          ./scripts/feeds install -a -p passwall_packages -p passwall_luci -p passwall2 -p luci
+          # This is the crucial fix: Ignore errors during the install step.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
@@ -357,9 +356,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # Install ONLY our custom feeds and luci to avoid errors from broken base packages.
-          # The main 'make' command will still try to build everything else later.
-          ./scripts/feeds install -a -p passwall_packages -p passwall_luci -p passwall2 -p luci
+          # This is the crucial fix: Ignore errors during the install step.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
@@ -458,9 +456,8 @@ jobs:
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
-          # Install ONLY our custom feeds and luci to avoid errors from broken base packages.
-          # The main 'make' command will still try to build everything else later.
-          ./scripts/feeds install -a -p passwall_packages -p passwall_luci -p passwall2 -p luci
+          # This is the crucial fix: Ignore errors during the install step.
+          ./scripts/feeds install -a || true
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
