@@ -157,7 +157,8 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           cat > .config << EOF
@@ -256,7 +257,8 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           cat > .config << EOF
@@ -355,7 +357,8 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           cat > .config << EOF
@@ -454,7 +457,8 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "Generating build configuration for ${{ matrix.target_subtarget }}..."
-          TARGET_MAIN="${{ matrix.target_subtarget }}"
+          # Sanitize the input to only take the first part before any space, fixing the "missing separator" error.
+          TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
           cat > .config << EOF
