@@ -4,7 +4,7 @@
 # This workflow:
 #   - Dynamically discovers all available build targets for each OpenWrt version.
 #   - Splits the build matrix into 4 parallel jobs for speed.
-#   - Builds from the full OpenWrt source.
+#   - Builds from the full OpenWrt source using the CORRECT, robust, multi-stage process.
 #   - Reads external package versions from 'cur_ver.json'.
 #   - Deploys the final repository to a separate GitHub repository (serverless).
 # ======================================================================================
