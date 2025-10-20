@@ -3,8 +3,7 @@
 #
 # This workflow uses the correct, robust, multi-stage process to prevent DDoS errors:
 #   1. SETUP: A single matrix job clones each OpenWrt version ONCE, adds all feeds,
-#      and caches the entire prepared source tree. This includes special handling for older
-#      OpenWrt versions to ensure feed compatibility.
+#      and caches the entire prepared source tree.
 #   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache instead of
 #      re-cloning, preventing rate-limiting and dramatically speeding up the process.
 # ======================================================================================
@@ -68,8 +67,6 @@ jobs:
         working-directory: ./openwrt
         run: |
           echo "Using compatible package versions for OpenWrt 22.03..."
-          # For older OpenWrt, we don't use the absolute latest commits.
-          # Instead, we pull from the main branch of the feeds, which is more likely to be compatible.
           cat >> feeds.conf.default << EOF
           src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages
           src-git passwall_luci https://github.com/peditx/openwrt-passwall
@@ -148,7 +145,8 @@ jobs:
       - name: Combine and Split Matrix
         id: split
         run: |
-          COMBINED_MATRIX=$(jq -c '[.[] | .targets | select(. != null and . != "") | fromjson] | flatten' <<< '${{ steps.read.outputs.result }}')
+          # This is the crucial fix: The new jq command correctly handles potentially null/empty values before parsing.
+          COMBINED_MATRIX=$(jq -c 'fromjson | .[] | .targets | fromjson | select(. != null)' <<< '${{ steps.read.outputs.result }}' | jq -s 'flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
