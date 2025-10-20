@@ -3,9 +3,10 @@
 #
 # This workflow uses the correct, robust, multi-stage process to prevent DDoS errors:
 #   1. SETUP: A single matrix job clones each OpenWrt version ONCE, adds all feeds,
-#      and caches the entire prepared source tree.
+#      and caches the entire prepared source tree. This includes special handling for older
+#      OpenWrt versions to ensure feed compatibility.
 #   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache instead of
-#      re-cloning, preventing GitHub rate-limiting and dramatically speeding up the process.
+#      re-cloning, preventing rate-limiting and dramatically speeding up the process.
 # ======================================================================================
 
 name: Build and Deploy Hybrid OpenWrt Packages (Serverless)
@@ -36,43 +37,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Read Package Versions for Main Branch from File
+      - name: Read Package Versions from File
         id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          # Read default latest versions from cur_ver.json, intended for the 'main' branch and modern releases
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
-      - name: Set Compatible Feed Versions for Each OpenWrt Release
-        id: feeds
-        run: |
-          OWRT_VERSION="${{ matrix.ref }}"
-          # Default to the latest versions from cur_ver.json for all modern branches
-          PASSWALL_PKGS="${{ steps.ver.outputs.packages }}"
-          PASSWALL_LUCI="${{ steps.ver.outputs.passwall }}"
-          PASSWALL2_LUCI="${{ steps.ver.outputs.passwall2 }}"
-
-          # --- CRITICAL FIX: Use specific, known-good feed versions ONLY for legacy releases ---
-          # This ensures that only older, incompatible OpenWrt versions get special handling.
-          case "$OWRT_VERSION" in
-            "openwrt-22.03")
-              echo "Using legacy feed branches for 22.03 compatibility."
-              # IMPORTANT: Replace these placeholders with real, compatible tags/branches for 22.03
-              PASSWALL_PKGS="main" # Using main as a placeholder, replace with a real compatible tag
-              PASSWALL_LUCI="main" # Using main as a placeholder, replace with a real compatible tag
-              PASSWALL2_LUCI="main" # Using main as a placeholder, replace with a real compatible tag
-              ;;
-            "main" | "openwrt-24.10" | "openwrt-23.05")
-              echo "Using latest feed branches from cur_ver.json for modern release: $OWRT_VERSION."
-              # No override needed, the defaults from the 'ver' step are used automatically.
-              ;;
-            *)
-              echo "Warning: No specific feed versions defined for $OWRT_VERSION. Using latest from cur_ver.json as a fallback."
-              ;;
-          esac
-
-          echo "packages=$PASSWALL_PKGS" >> $GITHUB_OUTPUT
-          echo "passwall=$PASSWALL_LUCI" >> $GITHUB_OUTPUT
-          echo "passwall2=$PASSWALL2_LUCI" >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.ref }} https://github.com/openwrt/openwrt.git openwrt
       - name: Clone custom single packages
@@ -80,23 +49,39 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git openwrt/package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
-      - name: Update feeds
+      
+      # --- SPECIAL HANDLING FOR FEEDS ---
+      - name: Update feeds for modern OpenWrt versions
+        if: matrix.ref != 'openwrt-22.03'
         working-directory: ./openwrt
         run: |
-          # Use the version selected in the 'Set Compatible Feed Versions' step
+          echo "Using latest dynamic package versions for modern OpenWrt..."
           cat >> feeds.conf.default << EOF
-          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.feeds.outputs.packages }}
-          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.feeds.outputs.passwall }}
-          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.feeds.outputs.passwall2 }}
+          src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
+          src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
+          src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
           ./scripts/feeds update -a
+
+      - name: Update feeds for legacy OpenWrt 22.03
+        if: matrix.ref == 'openwrt-22.03'
+        working-directory: ./openwrt
+        run: |
+          echo "Using compatible package versions for OpenWrt 22.03..."
+          # For older OpenWrt, we don't use the absolute latest commits.
+          # Instead, we pull from the main branch of the feeds, which is more likely to be compatible.
+          cat >> feeds.conf.default << EOF
+          src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages
+          src-git passwall_luci https://github.com/peditx/openwrt-passwall
+          src-git passwall2 https://github.com/peditx/openwrt-passwall2
+          EOF
+          ./scripts/feeds update -a
+
       - name: Cache the entire prepared OpenWrt source directory
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.ref }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.ref }}-
+          key: src-v2-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
 
   # Job 2: Dynamically generate the build matrix for each version
   generate_matrix:
@@ -118,9 +103,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.ref }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.ref }}-
+          key: src-v2-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Set target/subtarget list
         id: find_targets
         working-directory: ./openwrt
@@ -165,7 +148,6 @@ jobs:
       - name: Combine and Split Matrix
         id: split
         run: |
-          # This is the crucial fix: The new jq command correctly handles potentially null/empty values before parsing.
           COMBINED_MATRIX=$(jq -c '[.[] | .targets | select(. != null and . != "") | fromjson] | flatten' <<< '${{ steps.read.outputs.result }}')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
@@ -193,13 +175,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
+          key: src-v2-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -a
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -264,13 +247,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
+          key: src-v2-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -a
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -335,13 +319,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
+          key: src-v2-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -a
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -406,13 +391,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-${{ matrix.openwrt_version }}-${{ github.run_id }}
-          restore-keys: |
-            src-${{ matrix.openwrt_version }}-
+          key: src-v2-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -a
+          ./scripts/feeds install -f -p passwall_packages
+          ./scripts/feeds install -f -p passwall_luci
+          ./scripts/feeds install -f -p passwall2
+          ./scripts/feeds install -f -p luci
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -454,7 +440,7 @@ jobs:
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
-          name: packages-part4-${{ matrix.openwrt_version }}-${{ matrix.target_subtarget }}
+          name: packages-part4-${{ matrix.openwt_version }}-${{ matrix.target_subtarget }}
           path: dist
           retention-days: 1
 
