@@ -39,9 +39,14 @@ jobs:
       - name: Compile the 'usign' tool (with Verbose Logging)
         working-directory: ./openwrt_temp_for_tools
         run: |
-          # Generate a default, non-interactive configuration to prevent menuconfig from running.
+          # Update and install all default feeds to make sure tool definitions are available.
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+          # Generate a default, non-interactive configuration.
           make defconfig
-          # Now compile the 'usign' tool with high verbosity (V=s) to find the root cause of any error.
+          
+          # Now compile the 'usign' tool with high verbosity to find the root cause of any error.
           make tools/usign/compile V=s
 
       - name: Generate usign key pair
