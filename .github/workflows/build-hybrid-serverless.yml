@@ -36,13 +36,13 @@ jobs:
       - name: Clone OpenWrt source (for tools only)
         run: git clone --depth 1 https://github.com/openwrt/openwrt.git openwrt_temp_for_tools
 
-      - name: Compile the 'usign' tool
+      - name: Compile the 'usign' tool (with Verbose Logging)
         working-directory: ./openwrt_temp_for_tools
         run: |
           # Generate a default, non-interactive configuration to prevent menuconfig from running.
           make defconfig
-          # Now compile the 'usign' tool
-          make tools/usign/compile
+          # Now compile the 'usign' tool with high verbosity (V=s) to find the root cause of any error.
+          make tools/usign/compile V=s
 
       - name: Generate usign key pair
         run: ./openwrt_temp_for_tools/staging_dir/host/bin/usign -G -s key-build
