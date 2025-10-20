@@ -121,6 +121,12 @@ jobs:
         id: ver
         run: |
           echo "Reading package versions from cur_ver.json..."
+          # If cur_ver.json doesn't exist (e.g., on first run), create an empty one to prevent failure.
+          # The build will proceed using the latest commit from the feeds.
+          if [ ! -f cur_ver.json ]; then
+            echo "cur_ver.json not found. Creating a default empty file to proceed."
+            echo "{}" > cur_ver.json
+          fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -216,6 +222,12 @@ jobs:
         id: ver
         run: |
           echo "Reading package versions from cur_ver.json..."
+          # If cur_ver.json doesn't exist (e.g., on first run), create an empty one to prevent failure.
+          # The build will proceed using the latest commit from the feeds.
+          if [ ! -f cur_ver.json ]; then
+            echo "cur_ver.json not found. Creating a default empty file to proceed."
+            echo "{}" > cur_ver.json
+          fi
           jq -r 'keys[] as $k | "\($k)=\(.[$k].version)"' cur_ver.json >> $GITHUB_OUTPUT
       - name: Clone OpenWrt source code
         run: git clone --depth 1 --branch ${{ matrix.openwrt_version }} https://github.com/openwrt/openwrt.git openwrt
@@ -299,6 +311,23 @@ jobs:
       - name: Create repository index pages
         run: |
           cd dist
+          # This script will generate an index.html for each directory, allowing for easy browsing.
+          echo "Generating recursive index pages..."
+          find . -type d -exec bash -c '
+            cd "$0"
+            echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title></head><body><h1>Index of $(pwd)</h1><hr><pre>" > index.html
+            echo "<a href=\"../\">../</a>" >> index.html
+            for item in *; do
+              if [ -d "$item" ]; then
+                echo "<a href=\"$item/\">$item/</a>" >> index.html
+              else
+                echo "<a href=\"$item\">$item</a>" >> index.html
+              fi
+            done
+            echo "</pre><hr></body></html>"
+          ' {} \;
+
+          # Handle the root index page separately for a cleaner look
           echo '<!DOCTYPE html><html><head><title>PeDitXOS Repository</title><style>body{font-family: sans-serif; padding: 2em;}</style></head><body>' > index.html
           echo '<h1>PeDitXOS Repository</h1>' >> index.html
           echo '<h2>Available OpenWrt Versions:</h2><ul>' >> index.html
@@ -307,7 +336,7 @@ jobs:
             echo "<li><a href=\"$version_name/\">$version_name</a></li>" >> index.html
           done
           echo '</ul>' >> index.html
-          find . -name 'key-build-*.pub' -print -exec cp {} ./key-build.pub \; -quit
+          find . -maxdepth 2 -name 'key-build-*.pub' -print -exec cp {} ./key-build.pub \; -quit
           if [ -f "./key-build.pub" ]; then
             echo '<h3>Public Signing Key: <a href="key-build.pub">key-build.pub</a></h3>' >> index.html
           fi
@@ -322,4 +351,6 @@ jobs:
           publish_branch: repo
           force_orphan: true
           cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
 
