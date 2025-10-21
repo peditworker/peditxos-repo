@@ -2,14 +2,7 @@
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
 # This workflow returns to the original, correct, and fast SDK-based build method.
-# It avoids the complexities and errors of a full source build.
-#
-# Key features:
-#   - Uses the fast and reliable OpenWrt SDK.
-#   - Dynamically discovers all available architectures.
-#   - Splits the build matrix into 4 parallel jobs to avoid GitHub limits.
-#   - Includes special compatibility handling for OpenWrt 22.03.
-#   - Deploys the final repository to a separate GitHub repository (serverless).
+# It uses standard GitHub Actions features to pass data, removing unreliable third-party actions.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -28,7 +21,7 @@ jobs:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
     outputs:
-      sdks: ${{ steps.out.outputs.sdks }}
+      sdks: ${{ steps.find_targets.outputs.sdks }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,14 +51,6 @@ jobs:
           done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
           JSON="$JSON"']'
           echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
-      - name: Store matrix output
-        uses: cloudposse/github-action-matrix-outputs-write@main
-        id: out
-        with:
-          matrix-step-name: ${{ github.job }}
-          matrix-key: ${{ matrix.ref }}
-          outputs: |-
-            sdks: ${{ steps.find_targets.outputs.sdks }}
 
   # Job 2: Gather and split the combined matrix into four parts
   split_matrix:
@@ -78,16 +63,13 @@ jobs:
       matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
       matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
     steps:
-      - name: Read all matrix outputs
-        id: read
-        uses: cloudposse/github-action-matrix-outputs-read@main
-        with:
-          matrix-step-name: generate_matrix
       - name: Combine and Split Matrix
         id: split
         run: |
-          # This is the crucial fix: The new jq command correctly handles the complex nested JSON string structure.
-          COMBINED_MATRIX=$(jq -c '[.[] | .outputs.sdks | fromjson? // empty] | flatten' <<< '${{ steps.read.outputs.result }}')
+          # This is the crucial fix: We now use the standard 'needs' context to get data,
+          # which is reliable and removes the need for third-party actions.
+          ALL_OUTPUTS='${{ toJSON(needs.generate_matrix.outputs) }}'
+          COMBINED_MATRIX=$(echo "$ALL_OUTPUTS" | jq -c '[.[] | fromjson? // empty] | flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
@@ -119,7 +101,6 @@ jobs:
         uses: moetayuko/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
-          # Special handling for 22.03 to use compatible feed versions
           EXTRA_FEEDS: |
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages {0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git passwall_luci https://github.com/peditx/openwrt-passwall' || format('src-git-full passwall_luci https://github.com/peditx/openwrt-passwall {0}', steps.ver.outputs.passwall) }}
@@ -127,17 +108,14 @@ jobs:
             src-git themeswitch https://github.com/peditx/luci-app-themeswitch
             src-git theme_peditx https://github.com/peditx/luci-theme-peditx
             src-git theme_carbonpx https://github.com/peditx/luci-theme-carbonpx
-          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }} # Note: Use a different secret name to avoid confusion
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }}
           IGNORE_ERRORS: n m y
-
       - name: Organize packages for artifact upload
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -183,9 +161,7 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -231,9 +207,7 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -279,9 +253,7 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
