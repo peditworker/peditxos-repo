@@ -67,6 +67,7 @@ jobs:
         id: split
         run: |
           ALL_OUTPUTS='${{ toJSON(needs.generate_matrix.outputs) }}'
+          # This is the crucial fix: The new jq command correctly handles the complex nested JSON string structure.
           COMBINED_MATRIX=$(echo "$ALL_OUTPUTS" | jq -c '[.[] | fromjson? // empty] | flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
