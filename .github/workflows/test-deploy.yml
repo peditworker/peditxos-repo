@@ -1,0 +1,84 @@
+# ======================================================================================
+# DEPLOYMENT TEST WORKFLOW
+#
+# This is a fast, standalone workflow to test ONLY the deploy step.
+# It does NOT build any packages. It simulates the build output and then runs
+# the final deploy and page generation logic.
+# Run this manually to verify the deploy process in under 1 minute.
+# ======================================================================================
+
+name: (Test) Deploy Step Only
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test_deployment:
+    name: Test Deploy Logic
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
+
+      - name: Create fake build artifacts for testing
+        run: |
+          mkdir -p dist/main/x86_64
+          mkdir -p dist/openwrt-23.05/aarch64_cortex-a53
+          touch dist/main/x86_64/fake-package-1.ipk
+          touch dist/openwrt-23.05/aarch64_cortex-a53/fake-package-2.ipk
+          echo "pub key content" > dist/key-build.pub
+          echo "Fake artifacts created."
+
+      - name: Create repository index pages (Copied from main workflow)
+        run: |
+          echo "Running the exact same deploy script..."
+          # --- Copy PWA assets ---
+          if [ -d "fav" ]; then cp -r fav ./dist/; fi
+          
+          # --- Create File Browser Pages ---
+          find ./dist -type d -exec bash -c '
+            cd "$0"
+            cat > index.html << EOL
+          <!DOCTYPE html><html><head><title>Index of $(pwd)</title>
+          <style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>
+          </head><body><h1>Index of $(pwd | sed "s|/home/runner/work/peditxos-repo/peditxos-repo/dist||")</h1><hr><pre><a href="../">../</a>
+          EOL
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            echo "</pre><hr></body></html>" >> index.html
+          ' {} \;
+
+          # --- Create Main Landing Page ---
+          cd ./dist
+          BROWSE_HTML=""
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
+            version_name=$(basename "$dir")
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
+          done
+          cd ..
+          
+          if [ -f "index.html" ]; then
+            cp index.html ./dist/
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+          fi
+          echo "Index pages generated successfully."
+
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo-test # Use a separate test branch to avoid overwriting your main repo
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
+
+      - name: Final Check
+        run: echo "✅ Deploy test complete. Check the 'repo-test' branch in your peditx/PeDitXOS-Repository."
