@@ -1,8 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
-# This workflow uses standard GitHub Artifacts to pass data between jobs, which is
-# the most reliable method for matrix strategies.
+# This workflow returns to the original, correct, and fast SDK-based build method.
+# It uses standard GitHub Artifacts to pass data, which is the most reliable method.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
