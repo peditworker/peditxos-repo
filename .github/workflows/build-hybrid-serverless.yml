@@ -2,7 +2,7 @@
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
 # This workflow returns to the original, correct, and fast SDK-based build method.
-# It uses the correct IGNORE_ERRORS flag ('n m y') from your initial working code.
+# It re-introduces the crucial toolchain override from your initial working code.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -109,6 +109,10 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -158,6 +162,10 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -207,6 +215,10 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -256,6 +268,10 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -291,7 +307,7 @@ jobs:
           path: ./dist
           pattern: packages-part*
           merge-multiple: true
-      - name: Checkout main repository to get PWA assets
+      - name: Checkout main repository to get static assets
         uses: actions/checkout@v4
       - name: Create repository index pages
         run: |
