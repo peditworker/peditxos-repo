@@ -2,8 +2,7 @@
 # DEPLOYMENT TEST WORKFLOW
 #
 # This is a fast, standalone workflow to test ONLY the deploy step.
-# It does NOT build any packages. It simulates the build output and then runs
-# the final deploy and page generation logic.
+# It simulates the build output and then runs the final deploy and page generation logic.
 # Run this manually to verify the deploy process in under 1 minute.
 # ======================================================================================
 
@@ -14,7 +13,7 @@ on:
 
 jobs:
   test_deployment:
-    name: Test Deploy Logic
+    name: Verify Deploy Logic
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main repository to get static assets
@@ -22,19 +21,40 @@ jobs:
 
       - name: Create fake build artifacts for testing
         run: |
-          mkdir -p dist/main/x86_64
-          mkdir -p dist/openwrt-23.05/aarch64_cortex-a53
-          touch dist/main/x86_64/fake-package-1.ipk
-          touch dist/openwrt-23.05/aarch64_cortex-a53/fake-package-2.ipk
-          echo "pub key content" > dist/key-build.pub
-          echo "Fake artifacts created."
+          # --- Create simulated IPK structure (133 total jobs) ---
+          mkdir -p dist/openwrt-24.10/aarch64_cortex-a72
+          mkdir -p dist/openwrt-23.05/x86_64
+          mkdir -p dist/main/arm_cortex-a9
+          mkdir -p dist/openwrt-22.03/mips_24kc
+          
+          # Simulate individual artifact folders merged together
+          echo "Simulating merge of 4 build parts..."
+          mkdir -p matrix-artifacts
+          
+          # Simulate packages-* artifacts (Normally uploaded by build jobs)
+          for arch in x86_64 aarch64_cortex-a72; do
+            # Create files and the Packages index files for the final step to find
+            mkdir -p matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch
+            touch matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch/package-A-$arch.ipk
+            touch matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch/Packages.gz
+          done
+          
+          # Merge these simulated artifacts into the final working directory
+          find matrix-artifacts -type f -exec cp --parents {} ./dist-merged/ \;
+          
+          # Create final public key (which is normally created during the build but we simulate it here)
+          echo "TEST_KEY_CONTENT" > ./dist-merged/key-build.pub
+          
+          # Copy static files needed for the deploy script
+          if [ -d "fav" ]; then cp -r fav ./dist-merged/; fi
+          if [ -f "index.html" ]; then cp index.html ./dist-merged/index.html; fi
+          
+          # Rename for deploy
+          mv dist-merged dist
 
-      - name: Create repository index pages (Copied from main workflow)
+      - name: Create repository index pages (Actual Deploy Logic)
         run: |
           echo "Running the exact same deploy script..."
-          # --- Copy PWA assets ---
-          if [ -d "fav" ]; then cp -r fav ./dist/; fi
-          
           # --- Create File Browser Pages ---
           find ./dist -type d -exec bash -c '
             cd "$0"
@@ -53,6 +73,9 @@ jobs:
           ' {} \;
 
           # --- Create Main Landing Page ---
+          PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
+          if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
           cd ./dist
           BROWSE_HTML=""
           for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
@@ -66,7 +89,6 @@ jobs:
             cp index.html ./dist/
             sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
           fi
-          echo "Index pages generated successfully."
 
       - name: Push updates to repository
         uses: peaceiris/actions-gh-pages@v4
@@ -74,7 +96,7 @@ jobs:
           deploy_key: ${{ secrets.DEPLOY_KEY }}
           external_repository: peditx/PeDitXOS-Repository
           publish_dir: ./dist
-          publish_branch: repo-test # Use a separate test branch to avoid overwriting your main repo
+          publish_branch: repo-test # Pushes to a test branch for safe verification
           force_orphan: true
           cname: downloads.peditxos.ir
           user_name: 'peditworker'
