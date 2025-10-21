@@ -1,8 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
-# This workflow returns to the original, correct, and fast SDK-based build method.
-# It uses the special syntax required by the gh-action-sdk to ensure compatibility.
+# This workflow uses the original, correct, and fast SDK-based build method.
+# It manually clones problematic feeds (themes) to bypass action compatibility issues.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -67,7 +67,6 @@ jobs:
         id: split
         run: |
           ALL_OUTPUTS='${{ toJSON(needs.generate_matrix.outputs) }}'
-          # This is the crucial fix: The new jq command correctly handles the complex nested JSON string structure.
           COMBINED_MATRIX=$(echo "$ALL_OUTPUTS" | jq -c '[.[] | fromjson? // empty] | flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
@@ -96,6 +95,12 @@ jobs:
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           vers=$(nvcmp -c nvchecker.toml -aj)
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -104,9 +109,6 @@ jobs:
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
-            src-git|themeswitch|https://github.com/peditx/luci-app-themeswitch
-            src-git|theme_peditx|https://github.com/peditx/luci-theme-peditx
-            src-git|theme_carbonpx|https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -142,6 +144,12 @@ jobs:
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           vers=$(nvcmp -c nvchecker.toml -aj)
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -150,9 +158,6 @@ jobs:
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
-            src-git|themeswitch|https://github.com/peditx/luci-app-themeswitch
-            src-git|theme_peditx|https://github.com/peditx/luci-theme-peditx
-            src-git|theme_carbonpx|https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -188,6 +193,12 @@ jobs:
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           vers=$(nvcmp -c nvchecker.toml -aj)
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -196,9 +207,6 @@ jobs:
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
-            src-git|themeswitch|https://github.com/peditx/luci-app-themeswitch
-            src-git|theme_peditx|https://github.com/peditx/luci-theme-peditx
-            src-git|theme_carbonpx|https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -234,6 +242,12 @@ jobs:
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
           vers=$(nvcmp -c nvchecker.toml -aj)
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
         env:
@@ -242,9 +256,6 @@ jobs:
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
-            src-git|themeswitch|https://github.com/peditx/luci-app-themeswitch
-            src-git|theme_peditx|https://github.com/peditx/luci-theme-peditx
-            src-git|theme_carbonpx|https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
