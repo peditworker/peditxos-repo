@@ -1,9 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - Based on your original, working SDK method.
 #
-# This workflow returns to your proven SDK-based build method.
-# The only major change is splitting the final matrix into 4 parts to avoid GitHub's limit.
-# All other complexities have been removed.
+# This workflow returns to your proven SDK-based build method, enhanced with the
+# stability and scaling features we developed.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (Original SDK Method)
@@ -17,12 +16,10 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # Job 1: Your original, working matrix generation.
+  # Job 1: Dynamically generate the build matrix for each version and save it as a reliable artifact.
   generate_matrix:
-    name: Generate Matrix for ${{ matrix.ref }}
+    name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    outputs:
-      sdks: ${{ steps.out.outputs.sdks }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,8 +35,7 @@ jobs:
         with:
           repository: openwrt/openwrt
           ref: ${{ matrix.ref }}
-      - name: Set SDK targets
-        id: find_targets
+      - name: Set SDK targets and save to file
         run: |
           REF=${{ matrix.ref }}
           JSON='['
@@ -52,51 +48,33 @@ jobs:
             JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"'"$REF"'"}'
           done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
           JSON="$JSON"']'
-          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
-      - name: Store matrix output
-        uses: cloudposse/github-action-matrix-outputs-write@main
-        id: out
+          echo "$JSON" > matrix-${{ matrix.ref }}.json
+      - name: Upload matrix as artifact
+        uses: actions/upload-artifact@v4
         with:
-          matrix-step-name: ${{ github.job }}
-          matrix-key: ${{ matrix.ref }}
-          outputs: |-
-            sdks: ${{ steps.find_targets.outputs.sdks }}
+          name: matrix-${{ matrix.ref }}
+          path: matrix-${{ matrix.ref }}.json
 
-  # Job 2: Your original, working gathering job.
-  gather_matrix:
-    name: Gather Build Matrices
-    runs-on: ubuntu-latest
-    needs: generate_matrix
-    outputs:
-      result: ${{ steps.gather.outputs.result }}
-    steps:
-      - name: Read all matrix outputs
-        uses: cloudposse/github-action-matrix-outputs-read@main
-        id: read
-        with:
-          matrix-step-name: generate_matrix
-      - name: Gather matrices into a single list
-        id: gather
-        run: |
-          # Your original, working jq command
-          result=$(jq -c '.sdks[]' <<< '${{ steps.read.outputs.result }}' | jq -c -s add)
-          echo "result=${result}" >> $GITHUB_OUTPUT
-
-  # Job 3: The ONLY new part - Split the gathered list into 4.
+  # Job 2: Gather all artifacts and split the combined matrix into four parts.
   split_matrix:
     name: Split Build Matrix
     runs-on: ubuntu-latest
-    needs: gather_matrix
+    needs: generate_matrix
     outputs:
       matrix_part1: ${{ steps.split.outputs.matrix_part1 }}
       matrix_part2: ${{ steps.split.outputs.matrix_part2 }}
       matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
       matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
     steps:
-      - name: Split Matrix
+      - name: Download all matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: matrix-*
+          path: matrix-artifacts
+      - name: Combine and Split Matrix
         id: split
         run: |
-          COMBINED_MATRIX='${{ needs.gather_matrix.outputs.result }}'
+          COMBINED_MATRIX=$(find matrix-artifacts -name '*.json' -print0 | xargs -0 jq -s 'flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "Total jobs found: $TOTAL_JOBS"
@@ -105,23 +83,28 @@ jobs:
           echo "matrix_part3=$(echo "$COMBINED_MATRIX" | jq -c ".[${P2}:${P3}]")" >> $GITHUB_OUTPUT
           echo "matrix_part4=$(echo "$COMBINED_MATRIX" | jq -c ".[${P3}:]")" >> $GITHUB_OUTPUT
 
-  # Job 4: The build jobs, now split into 4 parallel runs.
+  # Job 3, Part 1: Build the first quarter of the matrix
   build_part1:
-    name: Build Part 1 (${{ strategy.job-index }}/${{ strategy.job-total }})
-    needs: split_matrix
+    name: Build Part 1 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    needs: split_matrix
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.split_matrix.outputs.matrix_part1) }}
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
-      - id: ver
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Retrieve Latest Versions
+        id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
-      - run: |
+          vers=$(nvcmp -c nvchecker.toml -aj)
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
           mkdir -p package
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
@@ -130,7 +113,8 @@ jobs:
         run: |
           echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
           echo "RUST_COMMIT=master" >> $GITHUB_ENV
-      - uses: moetayuko/gh-action-sdk@main
+      - name: Build Packages
+        uses: moetayuko/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -139,30 +123,41 @@ jobs:
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
-      - run: |
+      - name: Organize packages for artifact upload
+        run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
-      - uses: actions/upload-artifact@v4
-        with: { name: packages-part1, path: dist }
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part1-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
 
+  # Job 3, Part 2: Build the second quarter of the matrix
   build_part2:
-    name: Build Part 2 (${{ strategy.job-index }}/${{ strategy.job-total }})
-    needs: split_matrix
+    name: Build Part 2 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    needs: split_matrix
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.split_matrix.outputs.matrix_part2) }}
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
-      - id: ver
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Retrieve Latest Versions
+        id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
-      - run: |
+          vers=$(nvcmp -c nvchecker.toml -aj)
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
           mkdir -p package
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
@@ -171,7 +166,8 @@ jobs:
         run: |
           echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
           echo "RUST_COMMIT=master" >> $GITHUB_ENV
-      - uses: moetayuko/gh-action-sdk@main
+      - name: Build Packages
+        uses: moetayuko/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -180,30 +176,41 @@ jobs:
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
-      - run: |
+      - name: Organize packages for artifact upload
+        run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
-      - uses: actions/upload-artifact@v4
-        with: { name: packages-part2, path: dist }
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part2-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
 
+  # Job 3, Part 3: Build the third quarter of the matrix
   build_part3:
-    name: Build Part 3 (${{ strategy.job-index }}/${{ strategy.job-total }})
-    needs: split_matrix
+    name: Build Part 3 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    needs: split_matrix
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.split_matrix.outputs.matrix_part3) }}
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
-      - id: ver
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Retrieve Latest Versions
+        id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
-      - run: |
+          vers=$(nvcmp -c nvchecker.toml -aj)
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
           mkdir -p package
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
@@ -212,7 +219,8 @@ jobs:
         run: |
           echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
           echo "RUST_COMMIT=master" >> $GITHUB_ENV
-      - uses: moetayuko/gh-action-sdk@main
+      - name: Build Packages
+        uses: moetayuko/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -221,30 +229,41 @@ jobs:
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
-      - run: |
+      - name: Organize packages for artifact upload
+        run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
-      - uses: actions/upload-artifact@v4
-        with: { name: packages-part3, path: dist }
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part3-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
 
+  # Job 3, Part 4: Build the final quarter of the matrix
   build_part4:
-    name: Build Part 4 (${{ strategy.job-index }}/${{ strategy.job-total }})
-    needs: split_matrix
+    name: Build Part 4 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    needs: split_matrix
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.split_matrix.outputs.matrix_part4) }}
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
-      - id: ver
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Retrieve Latest Versions
+        id: ver
         run: |
           if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
-          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
-      - run: |
+          vers=$(nvcmp -c nvchecker.toml -aj)
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
           mkdir -p package
           git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
@@ -253,7 +272,8 @@ jobs:
         run: |
           echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
           echo "RUST_COMMIT=master" >> $GITHUB_ENV
-      - uses: moetayuko/gh-action-sdk@main
+      - name: Build Packages
+        uses: moetayuko/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -262,29 +282,39 @@ jobs:
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
-      - run: |
+      - name: Organize packages for artifact upload
+        run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
-      - uses: actions/upload-artifact@v4
-        with: { name: packages-part4, path: dist }
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-part4-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
 
-  # Job 5: The final deployment job
+  # Job 4: The final deployment job
   deploy:
     needs: [build_part1, build_part2, build_part3, build_part4]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
         with:
           path: ./dist
           pattern: packages-part*
           merge-multiple: true
-      - uses: actions/checkout@v4
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
       - name: Create repository index pages
         run: |
+          # --- Copy PWA assets ---
           if [ -d "fav" ]; then cp -r fav ./dist/; fi
+          
+          # --- Create File Browser Pages ---
           find ./dist -type d -exec bash -c '
             cd "$0"
             cat > index.html << EOL
@@ -300,20 +330,27 @@ jobs:
             done
             echo "</pre><hr></body></html>" >> index.html
           ' {} \;
+
+          # --- Create Main Landing Page ---
           PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
           if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
           cd ./dist
           BROWSE_HTML=""
           for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
             version_name=$(basename "$dir")
-            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${version_name}</a></li>"
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
           done
           cd ..
+          
           if [ -f "index.html" ]; then
             cp index.html ./dist/
             sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
           fi
-      - uses: peaceiris/actions-gh-pages@v4
+          
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.DEPLOY_KEY }}
           external_repository: peditx/PeDitXOS-Repository
