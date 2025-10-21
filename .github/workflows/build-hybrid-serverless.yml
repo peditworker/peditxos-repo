@@ -305,7 +305,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./dist
-          pattern: packages-part*
+          pattern: packages-*
           merge-multiple: true
       - name: Checkout main repository to get static assets
         uses: actions/checkout@v4
