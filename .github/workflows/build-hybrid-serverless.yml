@@ -1,11 +1,12 @@
 # ======================================================================================
-# FINAL, STABLE - OpenWrt Package Builder - Based on your original, working SDK method.
+# FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
-# This workflow returns to your proven SDK-based build method, with all critical
-# fixes for toolchains and error handling restored.
+# This workflow uses standard GitHub Artifacts to pass data between jobs, which is
+# the most reliable method for matrix strategies. The deploy step now uses a static
+# index.html from the repository for easier maintenance.
 # ======================================================================================
 
-name: Build and Deploy OpenWrt Packages (Original SDK Method)
+name: Build and Deploy OpenWrt Packages (SDK Method)
 
 on:
   workflow_dispatch:
@@ -16,7 +17,7 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # Job 1: Dynamically generate the build matrix for each version and save it as a reliable artifact.
+  # Job 1: Dynamically generate the build matrix for each version and save it as an artifact.
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
@@ -285,7 +286,7 @@ jobs:
       - name: Organize packages for artifact upload
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
-          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
@@ -346,6 +347,7 @@ jobs:
           
           if [ -f "index.html" ]; then
             cp index.html ./dist/
+            # Use a different delimiter for sed to avoid conflict with file paths
             sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
           fi
           
