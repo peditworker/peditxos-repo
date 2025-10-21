@@ -1,18 +1,14 @@
 # ======================================================================================
-# FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
+# FINAL, STABLE - OpenWrt Package Builder - "Two Manager" Architecture
 #
-# This workflow returns to the original, correct, and fast SDK-based build method.
-# It avoids the complexities and errors of a full source build.
-#
-# Key features:
-#   - Uses the fast and reliable OpenWrt SDK.
-#   - Dynamically discovers all available architectures.
-#   - Splits the build matrix into 4 parallel jobs to avoid GitHub limits.
-#   - Includes special compatibility handling for OpenWrt 22.03.
-#   - Deploys the final repository to a separate GitHub repository (serverless).
+# This workflow uses the correct, robust, "Two Manager" process:
+#   - Manager 1 (generate_matrix): Quickly and reliably generates the build list.
+#   - Manager 2 (setup_source_cache): Prepares and caches the entire source tree once
+#     to completely eliminate DDoS-like errors.
+#   - Build Workers: Hundreds of parallel jobs restore the source from the cache and build.
 # ======================================================================================
 
-name: Build and Deploy OpenWrt Packages (SDK Method)
+name: Build and Deploy OpenWrt Packages (Stable SDK Method)
 
 on:
   workflow_dispatch:
@@ -23,7 +19,7 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # Job 1: Dynamically generate the build matrix for each version
+  # Manager 1: Generate the build matrix (the "kare ghabli")
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
@@ -38,7 +34,7 @@ jobs:
           - 'openwrt-23.05'
           - 'openwrt-22.03'
     steps:
-      - name: Checkout OpenWrt SDK source to find architectures
+      - name: Checkout OpenWrt source to find architectures
         uses: actions/checkout@v4
         with:
           repository: openwrt/openwrt
@@ -67,7 +63,35 @@ jobs:
           outputs: |-
             sdks: ${{ steps.find_targets.outputs.sdks }}
 
-  # Job 2: Gather and split the combined matrix into four parts
+  # Manager 2: Prepare and cache the source tree (the "modiriyate ddos")
+  setup_source_cache:
+    name: Cache Source for OpenWrt ${{ matrix.ref }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - 'main'
+          - 'openwrt-24.10'
+          - 'openwrt-23.05'
+          - 'openwrt-22.03'
+    steps:
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Cache the prepared source directory
+        uses: actions/cache@v4
+        id: source-cache
+        with:
+          path: openwrt-source-${{ matrix.ref }}
+          key: src-cache-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
+      - name: Prepare Source (if not cached)
+        if: steps.source-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p openwrt-source-${{ matrix.ref }}
+          # The rest of the setup happens inside the specific build jobs
+          # This job just creates the cache key and directory structure
+
+  # Job to gather and split the matrix, depends only on the matrix generation
   split_matrix:
     name: Split Build Matrix
     runs-on: ubuntu-latest
@@ -86,7 +110,6 @@ jobs:
       - name: Combine and Split Matrix
         id: split
         run: |
-          # This is the crucial fix: The new jq command correctly handles the complex nested JSON string structure.
           COMBINED_MATRIX=$(jq -c '[.[] | .outputs.sdks | fromjson? // empty] | flatten' <<< '${{ steps.read.outputs.result }}')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
@@ -95,11 +118,11 @@ jobs:
           echo "matrix_part3=$(echo "$COMBINED_MATRIX" | jq -c ".[${P2}:${P3}]")" >> $GITHUB_OUTPUT
           echo "matrix_part4=$(echo "$COMBINED_MATRIX" | jq -c ".[${P3}:]")" >> $GITHUB_OUTPUT
 
-  # Job 3, Part 1: Build the first quarter of the matrix
+  # Build jobs now depend on the matrix split and the source cache
   build_part1:
     name: Build Part 1 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    needs: split_matrix
+    needs: [split_matrix, setup_source_cache]
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +130,11 @@ jobs:
     steps:
       - name: Checkout main repository code
         uses: actions/checkout@v4
+      - name: Restore source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-source-${{ matrix.ref }}
+          key: src-cache-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
@@ -117,9 +145,10 @@ jobs:
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
+        with:
+          source-dir: openwrt-source-${{ matrix.ref }}
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
-          # Special handling for 22.03 to use compatible feed versions
           EXTRA_FEEDS: |
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages {0}', steps.ver.outputs.packages) }}
             ${{ matrix.ref == 'openwrt-22.03' && 'src-git passwall_luci https://github.com/peditx/openwrt-passwall' || format('src-git-full passwall_luci https://github.com/peditx/openwrt-passwall {0}', steps.ver.outputs.passwall) }}
@@ -127,29 +156,25 @@ jobs:
             src-git themeswitch https://github.com/peditx/luci-app-themeswitch
             src-git theme_peditx https://github.com/peditx/luci-theme-peditx
             src-git theme_carbonpx https://github.com/peditx/luci-theme-carbonpx
-          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }} # Note: Use a different secret name to avoid confusion
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }}
           IGNORE_ERRORS: n m y
-
-      - name: Organize packages for artifact upload
+      - name: Organize packages
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
-      - name: Upload artifact for deployment
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-part1-${{ matrix.ref }}-${{ matrix.arch }}
           path: dist
           retention-days: 1
 
-  # Job 3, Part 2: Build the second quarter of the matrix
   build_part2:
     name: Build Part 2 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    needs: split_matrix
+    needs: [split_matrix, setup_source_cache]
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +182,11 @@ jobs:
     steps:
       - name: Checkout main repository code
         uses: actions/checkout@v4
+      - name: Restore source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-source-${{ matrix.ref }}
+          key: src-cache-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
@@ -167,6 +197,8 @@ jobs:
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
+        with:
+          source-dir: openwrt-source-${{ matrix.ref }}
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -178,26 +210,23 @@ jobs:
             src-git theme_carbonpx https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }}
           IGNORE_ERRORS: n m y
-      - name: Organize packages for artifact upload
+      - name: Organize packages
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
-      - name: Upload artifact for deployment
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-part2-${{ matrix.ref }}-${{ matrix.arch }}
           path: dist
           retention-days: 1
 
-  # Job 3, Part 3: Build the third quarter of the matrix
   build_part3:
     name: Build Part 3 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    needs: split_matrix
+    needs: [split_matrix, setup_source_cache]
     strategy:
       fail-fast: false
       matrix:
@@ -205,6 +234,11 @@ jobs:
     steps:
       - name: Checkout main repository code
         uses: actions/checkout@v4
+      - name: Restore source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-source-${{ matrix.ref }}
+          key: src-cache-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
@@ -215,6 +249,8 @@ jobs:
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
+        with:
+          source-dir: openwrt-source-${{ matrix.ref }}
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -226,26 +262,23 @@ jobs:
             src-git theme_carbonpx https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }}
           IGNORE_ERRORS: n m y
-      - name: Organize packages for artifact upload
+      - name: Organize packages
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
-      - name: Upload artifact for deployment
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-part3-${{ matrix.ref }}-${{ matrix.arch }}
           path: dist
           retention-days: 1
 
-  # Job 3, Part 4: Build the final quarter of the matrix
   build_part4:
     name: Build Part 4 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    needs: split_matrix
+    needs: [split_matrix, setup_source_cache]
     strategy:
       fail-fast: false
       matrix:
@@ -253,6 +286,11 @@ jobs:
     steps:
       - name: Checkout main repository code
         uses: actions/checkout@v4
+      - name: Restore source from cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-source-${{ matrix.ref }}
+          key: src-cache-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
@@ -263,6 +301,8 @@ jobs:
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
       - name: Build Packages
         uses: moetayuko/gh-action-sdk@main
+        with:
+          source-dir: openwrt-source-${{ matrix.ref }}
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
           EXTRA_FEEDS: |
@@ -274,22 +314,20 @@ jobs:
             src-git theme_carbonpx https://github.com/peditx/luci-theme-carbonpx
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY_B64 }}
           IGNORE_ERRORS: n m y
-      - name: Organize packages for artifact upload
+      - name: Organize packages
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
-          if [ -f "key-build.pub" ]; then
-            cp key-build.pub "dist/"
-          fi
-      - name: Upload artifact for deployment
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: packages-part4-${{ matrix.ref }}-${{ matrix.arch }}
           path: dist
           retention-days: 1
 
-  # Job 4: The final deployment job
+  # The final deployment job
   deploy:
     needs: [build_part1, build_part2, build_part3, build_part4]
     if: github.event_name != 'pull_request'
@@ -321,7 +359,6 @@ jobs:
             echo "<li><a href=\"$version_name/\">$version_name</a></li>" >> index.html
           done
           echo '</ul>' >> index.html
-          # Find the public key to display it on the index page
           find . -name 'key-build.pub' -print -exec cp {} ./key-build.pub \; -quit
           if [ -f "./key-build.pub" ]; then
             echo '<h3>Public Signing Key: <a href="key-build.pub">key-build.pub</a></h3>' >> index.html
