@@ -377,8 +377,7 @@ jobs:
                                   <p class="text-gray-400 mb-2">این دستور را در ترمینال روتر خود اجرا کنید تا به بسته‌های ما اعتماد کند:</p>
                                   <div class="relative">
                                       <button onclick="copyCode(this, 'code1')" class="absolute top-3 right-3 text-gray-400 hover:text-white transition-colors" title="کپی کردن"><i class="fas fa-copy"></i></button>
-                                      <pre id="code1" class="code-block p-4 rounded-md text-neon-cyan overflow-x-auto text-left"><code>wget -O /tmp/key-build.pub https://downloads.peditxos.ir/key-build.pub
-opkg-key add /tmp/key-build.pub</code></pre>
+                                      <pre id="code1" class="code-block p-4 rounded-md text-neon-cyan overflow-x-auto text-left"><code>wget -O /tmp/key-build.pub https://downloads.peditxos.ir/key-build.pub opkg-key add /tmp/key-build.pub</code></pre>
                                   </div>
                               </div>
                               <div>
@@ -387,11 +386,11 @@ opkg-key add /tmp/key-build.pub</code></pre>
                                    <div class="relative">
                                       <button onclick="copyCode(this, 'code2')" class="absolute top-3 right-3 text-gray-400 hover:text-white transition-colors" title="کپی کردن"><i class="fas fa-copy"></i></button>
                                       <pre id="code2" class="code-block p-4 rounded-md text-neon-cyan overflow-x-auto text-left"><code>. /etc/openwrt_release
-if [ "\$DISTRIB_RELEASE" = "SNAPSHOT" ]; then
-  echo "src/gz peditxos_repo https://downloads.peditxos.ir/main/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
-else
-  echo "src/gz peditxos_repo https://downloads.peditxos.ir/openwrt-\${DISTRIB_RELEASE%.*}/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
-fi</code></pre>
+                                      if [ "\$DISTRIB_RELEASE" = "SNAPSHOT" ]; then
+                                      echo "src/gz peditxos_repo https://downloads.peditxos.ir/main/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
+                                      else
+                                      echo "src/gz peditxos_repo https://downloads.peditxos.ir/openwrt-\${DISTRIB_RELEASE%.*}/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
+                                      fi</code></pre>
                                   </div>
                               </div>
                               <div>
@@ -400,7 +399,7 @@ fi</code></pre>
                                   <div class="relative">
                                       <button onclick="copyCode(this, 'code3')" class="absolute top-3 right-3 text-gray-400 hover:text-white transition-colors" title="کپی کردن"><i class="fas fa-copy"></i></button>
                                       <pre id="code3" class="code-block p-4 rounded-md text-neon-cyan overflow-x-auto text-left"><code>opkg update
-opkg install luci-app-passwall</code></pre>
+                                      opkg install luci-app-passwall</code></pre>
                                   </div>
                               </div>
                           </div>
