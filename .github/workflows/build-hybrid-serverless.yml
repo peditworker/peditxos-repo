@@ -1,8 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
-# This workflow returns to your proven SDK-based build method, with all critical
-# fixes for toolchains, error handling, and YAML syntax restored.
+# This workflow uses standard GitHub Artifacts to pass data between jobs, which is
+# the most reliable method. All deployment logic is now verified and integrated.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -120,7 +120,7 @@ jobs:
           EXTRA_FEEDS: |
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
-            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
+            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2' || format('src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -173,7 +173,7 @@ jobs:
           EXTRA_FEEDS: |
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
-            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
+            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2' || format('src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -226,7 +226,7 @@ jobs:
           EXTRA_FEEDS: |
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
-            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
+            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2' || format('src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -279,7 +279,7 @@ jobs:
           EXTRA_FEEDS: |
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages' || format('src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^{0}', steps.ver.outputs.packages) }}
             ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall_luci|https://github.com/peditx/openwrt-passwall' || format('src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^{0}', steps.ver.outputs.passwall) }}
-            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/peditx/openwrt-passwall2' || format('src-git|passwall2|https://github.com/peditx/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
+            ${{ contains(fromJSON('["openwrt-22.03", "openwrt-21.02"]'), matrix.ref) && 'src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2' || format('src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^{0}', steps.ver.outputs.passwall2) }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
       - name: Organize packages for artifact upload
@@ -360,4 +360,3 @@ jobs:
           cname: downloads.peditxos.ir
           user_name: 'peditworker'
           user_email: 'pedram.ale@me.com'
-
