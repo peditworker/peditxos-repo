@@ -51,7 +51,6 @@ jobs:
       - name: Upload matrix as artifact
         uses: actions/upload-artifact@v4
         with:
-          # This is the crucial fix: Make the artifact name unique for each job run.
           name: matrix-${{ matrix.ref }}
           path: matrix-${{ matrix.ref }}.json
 
@@ -69,13 +68,13 @@ jobs:
       - name: Download all matrix artifacts
         uses: actions/download-artifact@v4
         with:
-          # This is the crucial fix: Use a pattern to download all unique artifacts.
           pattern: matrix-*
           path: matrix-artifacts
       - name: Combine and Split Matrix
         id: split
         run: |
-          COMBINED_MATRIX=$(jq -s 'flatten' matrix-artifacts/*.json)
+          # This is the crucial fix: Find all .json files in all subdirectories and combine them.
+          COMBINED_MATRIX=$(find matrix-artifacts -name '*.json' -print0 | xargs -0 jq -s 'flatten')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
