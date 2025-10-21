@@ -390,7 +390,7 @@ opkg-key add /tmp/key-build.pub</code></pre>
 if [ "\$DISTRIB_RELEASE" = "SNAPSHOT" ]; then
   echo "src/gz peditxos_repo https://downloads.peditxos.ir/main/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
 else
-  echo "src-git peditxos_repo https://downloads.peditxos.ir/openwrt-\${DISTRIB_RELEASE%.*}/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
+  echo "src/gz peditxos_repo https://downloads.peditxos.ir/openwrt-\${DISTRIB_RELEASE%.*}/\$DISTRIB_ARCH" >> /etc/opkg/customfeeds.conf
 fi</code></pre>
                                   </div>
                               </div>
