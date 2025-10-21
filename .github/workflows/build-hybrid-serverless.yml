@@ -2,7 +2,7 @@
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
 # This workflow returns to your proven SDK-based build method, with all critical
-# fixes for toolchains, error handling, and the final packaging step restored.
+# fixes for toolchains, error handling, and YAML syntax restored.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -85,7 +85,7 @@ jobs:
 
   # Job 3, Part 1: Build the first quarter of the matrix
   build_part1:
-    name: Build Part 1 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
+    name: Build Part 1 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
     needs: split_matrix
     strategy:
@@ -126,10 +126,8 @@ jobs:
       - name: Organize packages for artifact upload
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
-          # Copy all .ipk files from all subdirectories
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
-          # THIS IS THE FIX: Only copy the master Packages* files from the top-level directory
-          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
@@ -140,7 +138,7 @@ jobs:
 
   # Job 3, Part 2: Build the second quarter of the matrix
   build_part2:
-    name: Build Part 2 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
+    name: Build Part 2 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
     needs: split_matrix
     strategy:
@@ -182,7 +180,7 @@ jobs:
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
-          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
@@ -193,7 +191,7 @@ jobs:
 
   # Job 3, Part 3: Build the third quarter of the matrix
   build_part3:
-    name: Build Part 3 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
+    name: Build Part 3 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
     needs: split_matrix
     strategy:
@@ -235,7 +233,7 @@ jobs:
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
-          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
@@ -246,7 +244,7 @@ jobs:
 
   # Job 3, Part 4: Build the final quarter of the matrix
   build_part4:
-    name: Build Part 4 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
+    name: Build Part 4 - ${{ matrix.arch }} for ${{ matrix.ref }}
     runs-on: ubuntu-latest
     needs: split_matrix
     strategy:
@@ -288,7 +286,7 @@ jobs:
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
-          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
