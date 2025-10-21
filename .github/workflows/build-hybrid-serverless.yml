@@ -119,7 +119,7 @@ jobs:
 
   # --- Stage 2: Build jobs, one for each OpenWrt version ---
   build_main:
-    name: Build for main (${{ strategy.job-index-plus-one }}/${{ strategy.job-total }})
+    name: Build for main
     needs: generate_matrix_main
     runs-on: ubuntu-latest
     strategy:
@@ -127,8 +127,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_main.outputs.sdks) }}
     steps:
-      - name: Add job-index-plus-one to strategy
-        run: echo "job-index-plus-one=${{ strategy.job-index + 1 }}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
@@ -161,7 +159,7 @@ jobs:
           retention-days: 1
 
   build_2410:
-    name: Build for 24.10 (${{ strategy.job-index-plus-one }}/${{ strategy.job-total }})
+    name: Build for 24.10
     needs: generate_matrix_2410
     runs-on: ubuntu-latest
     strategy:
@@ -169,8 +167,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2410.outputs.sdks) }}
     steps:
-      - name: Add job-index-plus-one to strategy
-        run: echo "job-index-plus-one=${{ strategy.job-index + 1 }}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
@@ -203,7 +199,7 @@ jobs:
           retention-days: 1
 
   build_2305:
-    name: Build for 23.05 (${{ strategy.job-index-plus-one }}/${{ strategy.job-total }})
+    name: Build for 23.05
     needs: generate_matrix_2305
     runs-on: ubuntu-latest
     strategy:
@@ -211,8 +207,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2305.outputs.sdks) }}
     steps:
-      - name: Add job-index-plus-one to strategy
-        run: echo "job-index-plus-one=${{ strategy.job-index + 1 }}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
@@ -245,7 +239,7 @@ jobs:
           retention-days: 1
 
   build_2203:
-    name: Build for 22.03 (${{ strategy.job-index-plus-one }}/${{ strategy.job-total }})
+    name: Build for 22.03
     needs: generate_matrix_2203
     runs-on: ubuntu-latest
     strategy:
@@ -253,8 +247,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2203.outputs.sdks) }}
     steps:
-      - name: Add job-index-plus-one to strategy
-        run: echo "job-index-plus-one=${{ strategy.job-index + 1 }}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
@@ -287,7 +279,7 @@ jobs:
           retention-days: 1
 
   build_2102:
-    name: Build for 21.02 (${{ strategy.job-index + 1 }}/${{ strategy.job-total }})
+    name: Build for 21.02
     needs: generate_matrix_2102
     runs-on: ubuntu-latest
     strategy:
@@ -295,8 +287,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2102.outputs.sdks) }}
     steps:
-      - name: Add job-index-plus-one to strategy
-        run: echo "job-index-plus-one=${{ strategy.job-index + 1 }}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
