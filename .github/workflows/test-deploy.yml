@@ -39,6 +39,9 @@ jobs:
             touch matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch/Packages.gz
           done
           
+          # Create the merged directory before copying
+          mkdir -p dist-merged
+          
           # Merge these simulated artifacts into the final working directory
           find matrix-artifacts -type f -exec cp --parents {} ./dist-merged/ \;
           
