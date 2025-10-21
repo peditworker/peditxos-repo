@@ -86,7 +86,8 @@ jobs:
       - name: Combine and Split Matrix
         id: split
         run: |
-          COMBINED_MATRIX=$(jq -c '[ fromjson | .[] | .outputs.sdks | fromjson? // empty ] | flatten' <<< '${{ steps.read.outputs.result }}')
+          # This is the crucial fix: The new jq command correctly handles the complex nested JSON string structure.
+          COMBINED_MATRIX=$(jq -c '[.[] | .outputs.sdks | fromjson? // empty] | flatten' <<< '${{ steps.read.outputs.result }}')
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
@@ -107,7 +108,7 @@ jobs:
       - name: Checkout main repository code
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pip && pip3 install nvchecker
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
         id: ver
         run: |
@@ -134,6 +135,9 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
+          if [ -f "key-build.pub" ]; then
+            cp key-build.pub "dist/"
+          fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -154,7 +158,7 @@ jobs:
       - name: Checkout main repository code
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pip && pip3 install nvchecker
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
         id: ver
         run: |
@@ -179,6 +183,9 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
+          if [ -f "key-build.pub" ]; then
+            cp key-build.pub "dist/"
+          fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -199,7 +206,7 @@ jobs:
       - name: Checkout main repository code
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pip && pip3 install nvchecker
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
         id: ver
         run: |
@@ -224,6 +231,9 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
+          if [ -f "key-build.pub" ]; then
+            cp key-build.pub "dist/"
+          fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -244,7 +254,7 @@ jobs:
       - name: Checkout main repository code
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pip && pip3 install nvchecker
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - name: Retrieve Latest Versions
         id: ver
         run: |
@@ -269,6 +279,9 @@ jobs:
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/packages/" \;
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" \;
+          if [ -f "key-build.pub" ]; then
+            cp key-build.pub "dist/"
+          fi
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -325,3 +338,4 @@ jobs:
           cname: downloads.peditxos.ir
           user_name: 'peditworker'
           user_email: 'pedram.ale@me.com'
+
