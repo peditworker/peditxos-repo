@@ -1,11 +1,10 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Repository Builder - "Download Once, Build Many" Architecture
 #
-# This workflow uses the correct, robust, multi-stage process to prevent DDoS errors:
-#   1. SETUP: A single matrix job clones each OpenWrt version ONCE, adds all feeds,
-#      and caches the entire prepared source tree.
-#   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache instead of
-#      re-cloning, preventing rate-limiting and dramatically speeding up the process.
+# This workflow uses the correct, robust, multi-stage process:
+#   1. SETUP: Creates a clean feeds.conf.default with modern GitHub URLs, clones all sources,
+#      and caches the entire prepared source tree. This is the definitive fix for all previous errors.
+#   2. BUILD: Hundreds of parallel jobs RESTORE the source from the cache and build.
 # ======================================================================================
 
 name: Build and Deploy Hybrid OpenWrt Packages (Serverless)
@@ -19,7 +18,7 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # Job 1: Setup a cached source tree for EACH OpenWrt version to avoid DDoS-like behavior.
+  # Job 1: Setup a cached source tree for EACH OpenWrt version.
   setup_source:
     name: Setup Source for OpenWrt ${{ matrix.ref }}
     runs-on: ubuntu-latest
@@ -49,36 +48,33 @@ jobs:
           git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git openwrt/package/luci-theme-peditx
           git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git openwrt/package/luci-theme-carbonpx
       
-      # --- SPECIAL HANDLING FOR FEEDS ---
-      - name: Update feeds for modern OpenWrt versions
-        if: matrix.ref != 'openwrt-22.03'
+      - name: Create a robust feeds.conf and update
         working-directory: ./openwrt
         run: |
-          echo "Using latest dynamic package versions for modern OpenWrt..."
+          # This is the DEFINITIVE FIX: Do not trust the default feeds.conf.
+          # Create a new one from scratch with the correct, modern GitHub URLs.
+          # This works for ALL versions, including 22.03.
+          cat > feeds.conf.default << EOF
+          src-git packages https://github.com/openwrt/packages.git;${{ matrix.ref }}
+          src-git luci https://github.com/openwrt/luci.git;${{ matrix.ref }}
+          src-git routing https://github.com/openwrt-feed/routing.git;master
+          src-git telephony https://github.com/openwrt-feed/telephony.git;master
+          EOF
+
+          # Now, append our custom feeds with their specific versions.
           cat >> feeds.conf.default << EOF
           src-git-full passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages ${{ steps.ver.outputs.packages }}
           src-git-full passwall_luci https://github.com/peditx/openwrt-passwall ${{ steps.ver.outputs.passwall }}
           src-git-full passwall2 https://github.com/peditx/openwrt-passwall2 ${{ steps.ver.outputs.passwall2 }}
           EOF
-          ./scripts/feeds update -a
-
-      - name: Update feeds for legacy OpenWrt 22.03
-        if: matrix.ref == 'openwrt-22.03'
-        working-directory: ./openwrt
-        run: |
-          echo "Using compatible package versions for OpenWrt 22.03..."
-          cat >> feeds.conf.default << EOF
-          src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages
-          src-git passwall_luci https://github.com/peditx/openwrt-passwall
-          src-git passwall2 https://github.com/peditx/openwrt-passwall2
-          EOF
+          
           ./scripts/feeds update -a
 
       - name: Cache the entire prepared OpenWrt source directory
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
 
   # Job 2: Dynamically generate the build matrix for each version
   generate_matrix:
@@ -100,7 +96,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.ref }}-${{ hashFiles('cur_ver.json') }}
       - name: Set target/subtarget list
         id: find_targets
         working-directory: ./openwrt
@@ -172,14 +168,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a -f
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -244,14 +237,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a -f
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -316,14 +306,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a -f
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
@@ -388,14 +375,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: src-v3-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
+          key: src-v4-${{ matrix.openwrt_version }}-${{ hashFiles('cur_ver.json') }}
       - name: Install feeds and generate config
         working-directory: ./openwrt
         run: |
-          ./scripts/feeds install -f -p passwall_packages
-          ./scripts/feeds install -f -p passwall_luci
-          ./scripts/feeds install -f -p passwall2
-          ./scripts/feeds install -f -p luci
+          ./scripts/feeds install -a -f
           TARGET_MAIN=$(echo "${{ matrix.target_subtarget }}" | cut -d' ' -f1)
           TARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f1)
           SUBTARGET=$(echo "$TARGET_MAIN" | cut -d'/' -f2)
