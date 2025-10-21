@@ -1,8 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
 #
-# This workflow uses the original, correct, and fast SDK-based build method.
-# It manually clones problematic feeds (themes) to bypass action compatibility issues.
+# This workflow uses standard GitHub Artifacts to pass data between jobs, which is
+# the most reliable method for matrix strategies.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (SDK Method)
@@ -16,12 +16,10 @@ on:
       - 'cur_ver.json'
 
 jobs:
-  # Job 1: Dynamically generate the build matrix for each version
+  # Job 1: Dynamically generate the build matrix for each version and save it as an artifact.
   generate_matrix:
     name: Generate Build Matrix for ${{ matrix.ref }}
     runs-on: ubuntu-latest
-    outputs:
-      sdks: ${{ steps.find_targets.outputs.sdks }}
     strategy:
       fail-fast: false
       matrix:
@@ -36,8 +34,7 @@ jobs:
         with:
           repository: openwrt/openwrt
           ref: ${{ matrix.ref }}
-      - name: Set SDK targets
-        id: find_targets
+      - name: Set SDK targets and save to file
         run: |
           REF=${{ matrix.ref }}
           JSON='['
@@ -50,9 +47,14 @@ jobs:
             JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"'"$REF"'"}'
           done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
           JSON="$JSON"']'
-          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+          echo "$JSON" > matrix-${{ matrix.ref }}.json
+      - name: Upload matrix as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: matrix-jsons
+          path: matrix-${{ matrix.ref }}.json
 
-  # Job 2: Gather and split the combined matrix into four parts
+  # Job 2: Gather all artifacts and split the combined matrix into four parts.
   split_matrix:
     name: Split Build Matrix
     runs-on: ubuntu-latest
@@ -63,11 +65,16 @@ jobs:
       matrix_part3: ${{ steps.split.outputs.matrix_part3 }}
       matrix_part4: ${{ steps.split.outputs.matrix_part4 }}
     steps:
+      - name: Download all matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: matrix-jsons
+          path: matrix-artifacts
       - name: Combine and Split Matrix
         id: split
         run: |
-          ALL_OUTPUTS='${{ toJSON(needs.generate_matrix.outputs) }}'
-          COMBINED_MATRIX=$(echo "$ALL_OUTPUTS" | jq -c '[.[] | fromjson? // empty] | flatten')
+          # This is the crucial fix: We now reliably combine all files from the artifacts.
+          COMBINED_MATRIX=$(jq -s 'flatten' matrix-artifacts/*.json)
           TOTAL_JOBS=$(echo "$COMBINED_MATRIX" | jq 'length')
           P1=$((TOTAL_JOBS / 4)); P2=$((P1 * 2)); P3=$((P1 * 3))
           echo "matrix_part1=$(echo "$COMBINED_MATRIX" | jq -c ".[0:${P1}]")" >> $GITHUB_OUTPUT
