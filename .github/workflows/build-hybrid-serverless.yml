@@ -1,8 +1,8 @@
 # ======================================================================================
 # FINAL, STABLE - OpenWrt Package Builder - Based on your original, working SDK method.
 #
-# This workflow returns to your proven SDK-based build method, enhanced with the
-# stability and scaling features we developed.
+# This workflow returns to your proven SDK-based build method, with all critical
+# fixes for toolchains and error handling restored.
 # ======================================================================================
 
 name: Build and Deploy OpenWrt Packages (Original SDK Method)
@@ -285,7 +285,7 @@ jobs:
       - name: Organize packages for artifact upload
         run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
-          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp {} "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - name: Upload artifact for deployment
