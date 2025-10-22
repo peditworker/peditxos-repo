@@ -81,7 +81,7 @@ jobs:
           BROWSE_HTML=""
           for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
             version_name=$(basename "$dir")
-            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/snapshots/Snapshot (main)/')
             BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
           done
           cd ..
@@ -102,3 +102,4 @@ jobs:
           cname: downloads.peditxos.ir
           user_name: 'peditworker'
           user_email: 'pedram.ale@me.com'
+
