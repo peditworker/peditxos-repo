@@ -1,0 +1,137 @@
+# ======================================================================================
+# FILE 3 of 4: Build LEGACY
+#
+# This workflow builds ONLY the 'legacy' branches (21.02, 22.03).
+# It runs ONLY manually (`workflow_dispatch`).
+# It does NOT deploy. It only builds and uploads artifacts.
+# ======================================================================================
+
+name: 3. Build Legacy Packages (21.02, 22.03)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # --- Stage 1: Generate Matrices ---
+  generate_matrix_2203:
+    name: Generate Matrix for 22.03
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-22.03' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-22.03","modern_toolchain":false}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  generate_matrix_2102:
+    name: Generate Matrix for 21.02
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-21.02' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-21.02","modern_toolchain":false}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  # --- Stage 2: Build Jobs ---
+  build_2203:
+    name: Build for 22.03
+    needs: generate_matrix_2203
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2203.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m n
+      - name: Organize packages for artifact upload
+        run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2203-${{ matrix.arch }}
+          path: dist
+          retention-days: 5
+
+  build_2102:
+    name: Build for 21.02
+    needs: generate_matrix_2102
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2102.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m n
+      - name: Organize packages for artifact upload
+        run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2102-${{ matrix.arch }}
+          path: dist
+          retention-days: 5
