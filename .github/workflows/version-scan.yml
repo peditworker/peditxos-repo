@@ -1,6 +1,6 @@
 # This workflow periodically scans for new package versions using nvchecker.
 # If a new version is found, it updates the 'cur_ver.json' file and commits the change.
-name: Scan for All Updates
+name: 0. Scan for All Updates
 
 on:
   schedule:
