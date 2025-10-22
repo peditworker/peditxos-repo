@@ -1,0 +1,97 @@
+# ======================================================================================
+# WORKFLOW 2: LEGACY BUILDS (22.03, 21.02)
+#
+# This workflow builds for older OpenWrt versions that need toolchain overrides.
+# - Uses compatible (non-versioned) feeds.
+# - Overrides Go and Rust compilers to 'master' to build modern packages.
+# ======================================================================================
+
+name: Build Legacy Packages (22.03, 21.02)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * 0' # Every Sunday at 01:00 UTC (1 hour after modern)
+  push:
+    paths:
+      - 'cur_ver.json'
+
+jobs:
+  generate_matrix_legacy:
+    name: Generate Matrix (Legacy)
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - 'openwrt-22.03'
+          - 'openwrt-21.02'
+    steps:
+      - name: Checkout OpenWrt SDK source
+        uses: actions/checkout@v4
+        with:
+          repository: openwrt/openwrt
+          ref: ${{ matrix.ref }}
+      - name: Set SDK targets and save to file
+        id: find_targets
+        run: |
+          REF=${{ matrix.ref }}
+          JSON='['
+          FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0
+            JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"'"$REF"'"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  build_legacy:
+    name: Build for ${{ matrix.ref }}
+    needs: generate_matrix_legacy
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_legacy.outputs.sdks) }}
+    steps:
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - name: Build Packages (Legacy Toolchain Override)
+        uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - name: Organize packages for artifact upload
+        run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Upload artifact for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-legacy-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
