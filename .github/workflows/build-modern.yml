@@ -2,6 +2,8 @@
 # FILE 2 of 4: Build MODERN (23.05, 24.10)
 #
 # This workflow builds the modern, stable branches.
+# FIX: Jobs are now separated for 24.10 and 23.05 for parallel execution
+#      and easier debugging.
 # ======================================================================================
 
 name: 2. Build Modern Packages (23.05, 24.10)
@@ -12,7 +14,7 @@ on:
     - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
 
 jobs:
-  # --- Stage 1: Generate Matrices ---
+  # --- Stage 1: Generate Matrices (Parallel) ---
   generate_matrix_2410:
     name: Generate Matrix for 24.10
     runs-on: ubuntu-latest
@@ -53,19 +55,71 @@ jobs:
           JSON="$JSON"']'
           echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
 
-  # --- Stage 2: Build Job ---
-  build_modern:
-    name: Build for 23.05 & 24.10
-    needs: [generate_matrix_2410, generate_matrix_2305]
+  # --- Stage 2: Build Job for 24.10 (Independent) ---
+  build_2410:
+    name: Build for 24.10
+    needs: [generate_matrix_2410]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - ${{ fromJson(needs.generate_matrix_2410.outputs.sdks) }}
-          - ${{ fromJson(needs.generate_matrix_2305.outputs.sdks) }}
+        include: ${{ fromJson(needs.generate_matrix_2410.outputs.sdks) }}
     steps:
-      # === FIX: Added step to free up disk space ===
+      - name: Free up disk space
+        if: matrix.modern_toolchain == true
+        run: |
+          echo "Freeing up disk space..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo docker image prune -a -f
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        if: matrix.modern_toolchain == true
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m n
+      - name: Organize packages for artifact upload
+        run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.ref }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 5
+
+  # --- Stage 2: Build Job for 23.05 (Independent) ---
+  build_2305:
+    name: Build for 23.05
+    needs: [generate_matrix_2305]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2305.outputs.sdks) }}
+    steps:
       - name: Free up disk space
         if: matrix.modern_toolchain == true
         run: |
