@@ -6,7 +6,7 @@
 # This ensures stability before running the full matrix.
 # ======================================================================================
 
-name: (TEST) Single CPU Full Build
+name: (Test) Single CPU Full Build
 
 on:
   workflow_dispatch:
