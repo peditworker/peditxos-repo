@@ -3,6 +3,9 @@
 #
 # This workflow builds ONLY the 'main' branch, but outputs to the 'snapshots'
 # directory as required by opkg on routers.
+#
+# FIX: This version correctly uses "main" as the SDK tag for docker
+#      and "snapshots" as the output directory name.
 # ======================================================================================
 
 name: 1. Build Main (Snapshot) Packages
@@ -30,8 +33,8 @@ jobs:
             [ -z "$line" ] && continue
             ARCH=$(echo "$line" | cut -d " " -f 1)
             [[ $FIRST -ne 1 ]] && JSON="$JSON"','
-            # === FIX: Changed "ref":"main" to "ref":"snapshots" ===
-            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"snapshots","modern_toolchain":true}'
+            # === FIX: Use "sdk_ref" for docker tag and "output_ref" for directory ===
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","sdk_ref":"main","output_ref":"snapshots","modern_toolchain":true}'
           done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
           JSON="$JSON"']'
           echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
@@ -72,8 +75,9 @@ jobs:
           echo "RUST_COMMIT=master" >> $GITHUB_ENV
       - uses: moetayuko/gh-action-sdk@main
         env:
-          # ARCH is now e.g. aarch64_cortex-a53-snapshots
-          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          # === FIX: Use sdk_ref for the docker image tag ===
+          # ARCH is now e.g. aarch64_cortex-a53-main
+          ARCH: ${{ matrix.arch }}-${{ matrix.sdk_ref }}
           EXTRA_FEEDS: |
             src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
             src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
@@ -82,15 +86,16 @@ jobs:
           IGNORE_ERRORS: n m n
       - name: Organize packages for artifact upload
         run: |
+          # === FIX: Use output_ref for the directory path ===
           # This now correctly creates dist/snapshots/aarch64_cortex-a53/
-          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
-          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
-          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          mkdir -p "dist/${{ matrix.output_ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.output_ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.output_ref }}/${{ matrix.arch }}/" {} +
           if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
       - uses: actions/upload-artifact@v4
         with:
-          # This artifact name now correctly reflects "snapshots"
-          name: packages-snapshots-${{ matrix.arch }}
+          # === FIX: Use output_ref for the artifact name ===
+          name: packages-${{ matrix.output_ref }}-${{ matrix.arch }}
           path: dist
           retention-days: 5 # Keep artifact for 5 days for deploy job to find
 
