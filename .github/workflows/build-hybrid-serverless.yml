@@ -151,7 +151,8 @@ jobs:
             src-git|passwall2|https://github.com/peditx/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
           KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
           IGNORE_ERRORS: n m y
-      - run: |
+      - name: Organize packages for artifact upload
+        run: |
           mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
