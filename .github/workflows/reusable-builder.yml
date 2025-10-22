@@ -40,7 +40,11 @@ jobs:
       sdks: ${{ steps.find_targets.outputs.sdks }}
     steps:
       - uses: actions/checkout@v4
-        with: { repository: openwrt/openwrt, ref: ${{ inputs.openwrt_ref }} }
+        # === FIX: Corrected YAML syntax for 'with' block ===
+        with:
+          repository: openwrt/openwrt
+          ref: ${{ inputs.openwrt_ref }}
+          
       - id: find_targets
         run: |
           JSON='['; FIRST=1
@@ -113,7 +117,8 @@ jobs:
           mkdir -p "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}"
           find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}/" {} +
           find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}/" {} +
-          if [ -f "key-bool.pub" ]; then cp key-bool.pub "dist/"; fi
+          # === FIX: Corrected typo from key-bool.pub to key-build.pub ===
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
           
       - uses: actions/upload-artifact@v4
         with:
