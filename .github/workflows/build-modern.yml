@@ -2,8 +2,7 @@
 # FILE 2 of 4: Build MODERN (23.05, 24.10)
 #
 # This workflow builds the modern, stable branches.
-# FIX: Jobs are now separated for 24.10 and 23.05 for parallel execution
-#      and easier debugging.
+# FIX: Made disk cleanup step more AGGRESSIVE to prevent "No space left" errors.
 # ======================================================================================
 
 name: 2. Build Modern Packages (23.05, 24.10)
@@ -65,14 +64,22 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2410.outputs.sdks) }}
     steps:
-      - name: Free up disk space
+      - name: Free up disk space (Aggressive)
         if: matrix.modern_toolchain == true
         run: |
-          echo "Freeing up disk space..."
+          echo "Starting disk space cleanup..."
+          df -h
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/CodeQL"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/swift"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/go"
+          sudo rm -rf "/usr/local/lib/android"
+          sudo rm -rf "/usr/local/share/powershell"
           sudo docker image prune -a -f
+          echo "Cleanup finished."
+          df -h
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
@@ -120,14 +127,22 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.generate_matrix_2305.outputs.sdks) }}
     steps:
-      - name: Free up disk space
+      - name: Free up disk space (Aggressive)
         if: matrix.modern_toolchain == true
         run: |
-          echo "Freeing up disk space..."
+          echo "Starting disk space cleanup..."
+          df -h
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/CodeQL"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/swift"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY/go"
+          sudo rm -rf "/usr/local/lib/android"
+          sudo rm -rf "/usr/local/share/powershell"
           sudo docker image prune -a -f
+          echo "Cleanup finished."
+          df -h
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
       - id: ver
