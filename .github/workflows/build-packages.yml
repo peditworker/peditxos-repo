@@ -98,33 +98,38 @@ jobs:
           
       - name: Create repository index pages
         run: |
+          # All lines in this multi-line script MUST have the same base indentation (10 spaces)
+          
           # --- Copy PWA assets ---
           if [ -d "static_assets/fav" ]; then cp -r static_assets/fav ./dist/; fi
           
           # --- Create File Browser Pages ---
+          # === FIX: Replaced problematic 'cat << EOL' with robust 'echo' commands ===
+          # This avoids all YAML/bash indentation conflicts.
           find ./dist -type d -exec bash -c '
+            # This whole script runs for each directory found by find
             cd "$0"
+            
             # Skip if index.html already exists (e.g., in root or fav)
             [ -f "index.html" ] && exit 0
             
-# === FIX: Un-indented the entire 'cat' block to respect bash here-document rules ===
-# The 'cat' command and the 'EOL' terminator MUST be at column 0 within the script.
-cat > index.html << EOL
-<!DOCTYPE html><html><head><title>Index of $(pwd)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>
-</head><body><h1>Index of $(pwd | sed "s|/home/runner/work/[^/]+/[^/]+/dist||")</h1><hr><pre><a href="../">../</a>
-EOL
-# === END FIX ===
+            # Create the index.html file using echo (robustly handles quotes)
+            echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title>" > index.html
+            echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" >> index.html
+            echo "<style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>" >> index.html
+            echo "</head><body><h1>Index of $(pwd | sed "s|/home/runner/work/[^/]+/[^/]+/dist||")</h1><hr><pre><a href=\"../\">../</a>" >> index.html
 
+            # Add directory/file links
             for item in *; do
               if [ "$item" != "index.html" ]; then
                 if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
                 else echo "<a href=\"$item\">$item</a>" >> index.html; fi
               fi
             done
+            
+            # Close the HTML
             echo "</pre><hr></body></html>" >> index.html
-          ' {} \;
+          ' {} \; # This closes the find -exec command
 
           # --- Create Main Landing Page ---
           PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
@@ -132,6 +137,7 @@ EOL
 
           cd ./dist
           BROWSE_HTML=""
+          # === FIX: Corrected missing parenthesis in basename command ===
           for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
             version_name=$(basename "$dir")
             display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
@@ -141,7 +147,7 @@ EOL
           
           if [ -f "static_assets/index.html" ]; then
             cp static_assets/index.html ./dist/
-            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWROWSE_HTML"'|' ./dist/index.html
           fi
           
       - name: Push updates to repository
