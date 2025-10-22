@@ -1,0 +1,158 @@
+# ======================================================================================
+# ORCHESTRATOR WORKFLOW
+#
+# This file is now clean and readable. It's job is to:
+# 1. Trigger the builds in parallel by calling the reusable "builder" workflow.
+# 2. Wait for all builds to complete.
+# 3. Run the single, final deploy job to prevent race conditions.
+# ======================================================================================
+
+name: Build and Deploy OpenWrt Packages (SDK Method)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
+  push:
+    paths:
+      - 'cur_ver.json'
+      - '.github/workflows/reusable-builder.yml' # Re-run if builder logic changes
+
+jobs:
+  # --- Stage 1: Call Reusable Builders in Parallel ---
+
+  call_build_main:
+    uses: ./.github/workflows/reusable-builder.yml
+    with:
+      version_name: 'main'
+      openwrt_ref: 'main'
+      modern_toolchain: true
+    secrets:
+      SIGN_PRIV_KEY: ${{ secrets.SIGN_PRIV_KEY }}
+
+  call_build_2410:
+    uses: ./.github/workflows/reusable-builder.yml
+    with:
+      version_name: '24.10'
+      openwrt_ref: 'openwrt-24.10'
+      modern_toolchain: true
+    secrets:
+      SIGN_PRIV_KEY: ${{ secrets.SIGN_PRIV_KEY }}
+
+  call_build_2305:
+    uses: ./.github/workflows/reusable-builder.yml
+    with:
+      version_name: '23.05'
+      openwrt_ref: 'openwrt-23.05'
+      modern_toolchain: true
+    secrets:
+      SIGN_PRIV_KEY: ${{ secrets.SIGN_PRIV_KEY }}
+
+  call_build_2203:
+    uses: ./.github/workflows/reusable-builder.yml
+    with:
+      version_name: '22.03'
+      openwrt_ref: 'openwrt-22.03'
+      modern_toolchain: false
+    secrets:
+      SIGN_PRIV_KEY: ${{ secrets.SIGN_PRIV_KEY }}
+
+  call_build_2102:
+    uses: ./.github/workflows/reusable-builder.yml
+    with:
+      version_name: '21.02'
+      openwrt_ref: 'openwrt-21.02'
+      modern_toolchain: false
+    secrets:
+      SIGN_PRIV_KEY: ${{ secrets.SIGN_PRIV_KEY }}
+
+  # --- Stage 2: Deploy All Packages ---
+  # This job runs ONCE after all parallel builds are finished.
+  deploy:
+    name: Deploy All Packages
+    needs: 
+      - call_build_main
+      - call_build_2410
+      - call_build_2305
+      - call_build_2203
+      - call_build_2102
+    if: github.event_name != 'pull_request' && always() # Use always() to run even if some builds fail, to deploy what succeeded
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+          pattern: packages-* # Downloads all artifacts starting with "packages-" from all jobs
+          merge-multiple: true # Merges them into the ./dist directory
+      
+      - name: Check downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -R ./dist
+          
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
+        with:
+          path: 'static_assets' # Checkout to a separate dir to not conflict with dist
+          
+      - name: Create repository index pages
+        run: |
+          # --- Copy PWA assets ---
+          if [ -d "static_assets/fav" ]; then cp -r static_assets/fav ./dist/; fi
+          
+          # --- Create File Browser Pages ---
+          find ./dist -type d -exec bash -c '
+            cd "$0"
+            # Skip if index.html already exists (e.g., in root or fav)
+            [ -f "index.html" ] && exit 0
+            
+# === FIX: Un-indented the entire 'cat' block to respect bash here-document rules ===
+# The 'cat' command and the 'EOL' terminator MUST be at column 0 within the script.
+cat > index.html << EOL
+<!DOCTYPE html><html><head><title>Index of $(pwd)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>
+</head><body><h1>Index of $(pwd | sed "s|/home/runner/work/[^/]+/[^/]+/dist||")</h1><hr><pre><a href="../">../</a>
+EOL
+# === END FIX ===
+
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            echo "</pre><hr></body></html>" >> index.html
+          ' {} \;
+
+          # --- Create Main Landing Page ---
+          PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
+          if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
+          cd ./dist
+          BROWSE_HTML=""
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
+            version_name=$(basename "$dir")
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
+          done
+          cd ..
+          
+          if [ -f "static_assets/index.html" ]; then
+            cp static_assets/index.html ./dist/
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+          fi
+          
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
+
