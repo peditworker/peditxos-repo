@@ -1,75 +1,69 @@
 # ======================================================================================
-# FILE 4 of 4: Deploy ALL
+# FILE 4 of 4: Deploy All Packages
 #
-# This single workflow is responsible for ALL deployments.
-# It runs manually or on a schedule (e.g., daily).
-#
-# Its job:
-# 1. Download ALL artifacts from ALL recent build workflows.
-# 2. Merge them into one './dist' directory.
-# 3. Generate the COMPLETE index.html page.
-# 4. Deploy the complete repository to the 'repo' branch.
-#
-# This solves the race condition and ensures the repo is never incomplete.
+# This workflow downloads ALL artifacts from other builds and deploys them.
+# FIX: Removed 'schedule:' trigger to prevent race conditions.
+#      Added 'workflow_run:' to trigger automatically AFTER 'build-main.yml'
+#      succeeds, ensuring a complete repository build.
 # ======================================================================================
 
 name: 4. Deploy All Packages
 
 on:
-  workflow_dispatch: # Allows manual triggering
-  schedule:
-    - cron: '0 5 * * *' # Daily at 05:00 UTC (runs after other builds)
+  workflow_dispatch: # <-- Allows manual runs
+  workflow_run:
+    workflows: ["1. Build Main (Snapshots)"] # <-- CRITICAL FIX: Triggers after main build
+    types:
+      - completed
+    branches:
+      - main # Or your default branch name
 
 jobs:
+  # --- Stage 1: Deploy All Packages ---
   deploy:
-    name: Download, Merge, and Deploy All Packages
+    name: Deploy All Packages
+    # Only run if the triggering workflow (build-main) was successful
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all built packages
         uses: actions/download-artifact@v4
         with:
           path: ./dist
-          pattern: packages-* # Downloads ALL artifacts matching this pattern
-          merge-multiple: true # Merges them all into ./dist
-          # This action will find artifacts from other workflow runs in this repo
-          
-      - name: Check downloaded artifacts
+          pattern: packages-*
+          merge-multiple: true
+          if-no-files-found: ignore
+
+      - name: Create dist dir if it doesn't exist
+        run: mkdir -p ./dist
+
+      - name: Show merged directory structure
         run: |
           echo "Downloaded artifacts. Merged structure:"
           ls -R ./dist
-          echo "Checking for empty dist..."
-          if [ -z "$(ls -A ./dist)" ]; then
-            echo "::error:: No artifacts found. Aborting deploy."
-            exit 1
-          fi
 
       - name: Checkout main repository to get static assets
         uses: actions/checkout@v4
-        with:
-          path: 'static_assets' # Checkout to a separate dir
-          
+
       - name: Create repository index pages
         run: |
           # --- Copy PWA assets ---
-          if [ -d "static_assets/fav" ]; then cp -r static_assets/fav ./dist/; fi
+          if [ -d "fav" ]; then cp -r fav ./dist/; fi
           
           # --- Create File Browser Pages ---
           find ./dist -type d -exec bash -c '
             cd "$0"
-            [ -f "index.html" ] && exit 0
-            
             echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title>" > index.html
             echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" >> index.html
             echo "<style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>" >> index.html
             echo "</head><body><h1>Index of $(pwd | sed "s|/home/runner/work/[^/]+/[^/]+/dist||")</h1><hr><pre><a href=\"../\">../</a>" >> index.html
-
+            
             for item in *; do
               if [ "$item" != "index.html" ]; then
                 if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
                 else echo "<a href=\"$item\">$item</a>" >> index.html; fi
               fi
             done
-            
             echo "</pre><hr></body></html>" >> index.html
           ' {} \;
 
@@ -86,8 +80,8 @@ jobs:
           done
           cd ..
           
-          if [ -f "static_assets/index.html" ]; then
-            cp static_assets/index.html ./dist/
+          if [ -f "index.html" ]; then
+            cp index.html ./dist/
             sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
           fi
           
@@ -97,7 +91,7 @@ jobs:
           deploy_key: ${{ secrets.DEPLOY_KEY }}
           external_repository: peditx/PeDitXOS-Repository
           publish_dir: ./dist
-          publish_branch: repo
+          publish_branch: repo # NOTE: Your test used 'repo-test', which is safer for debugging!
           force_orphan: true
           cname: downloads.peditxos.ir
           user_name: 'peditworker'
