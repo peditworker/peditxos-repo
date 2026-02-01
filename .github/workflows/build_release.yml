@@ -1,4 +1,4 @@
-name: Build and Release (Serverless)
+name: Build and Release (Serverless Cross-Repo)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           - openwrt-23.05
           - openwrt-24.10
     steps:
-      - name: Checkout
+      - name: Checkout OpenWrt SDK Source
         uses: actions/checkout@v4
         with:
           repository: openwrt/openwrt
@@ -102,9 +102,11 @@ jobs:
       - name: Install nvchecker
         run: pip3 install nvchecker
 
-      - name: Checkout
+      - name: Checkout Target Repo
         uses: actions/checkout@v4
         with:
+          repository: peditx/PeDitXOS-Repository
+          token: ${{ secrets.PAT }}
           fetch-depth: 0
 
       - name: Get build path
@@ -153,7 +155,7 @@ jobs:
           sed -ne 's!^ *ERROR: package/feeds/\(passwall[^ ]*\) .*$!\1!p' ../error.txt | sort -u | xargs -r find > ../../../logs.txt || true
           cat ../../../logs.txt || true
 
-      - name: Update Repository Folder
+      - name: Update Target Repository Folder
         run: |
           PKG_DIR="packages/${{ steps.get_build_path.outputs.pkg }}/${{ matrix.arch }}"
           LOG_DIR="packages/${{ steps.get_build_path.outputs.log }}/${{ matrix.arch }}"
@@ -171,16 +173,16 @@ jobs:
             rsync -av --files-from=logs.txt logs/package/feeds/ "$LOG_DIR/" || true
           fi
 
-          # Git Commit and Push
+          # Git Commit and Push to Target Repo
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          git pull origin ${{ github.ref_name }} --rebase
+          git pull origin main --rebase
           
           git add "packages/"
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Update builds for ${{ matrix.arch }}-${{ matrix.ref }}"
-            git push origin ${{ github.ref_name }}
+            git push origin main
           fi
