@@ -1,0 +1,104 @@
+# ======================================================================================
+# FILE 4 of 4: Deploy ALL
+#
+# This single workflow is responsible for ALL deployments.
+# It runs manually or on a schedule (e.g., daily).
+#
+# Its job:
+# 1. Download ALL artifacts from ALL recent build workflows.
+# 2. Merge them into one './dist' directory.
+# 3. Generate the COMPLETE index.html page.
+# 4. Deploy the complete repository to the 'repo' branch.
+#
+# This solves the race condition and ensures the repo is never incomplete.
+# ======================================================================================
+
+name: 4. Deploy All Packages
+
+on:
+  workflow_dispatch: # Allows manual triggering
+  schedule:
+    - cron: '0 5 * * *' # Daily at 05:00 UTC (runs after other builds)
+
+jobs:
+  deploy:
+    name: Download, Merge, and Deploy All Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+          pattern: packages-* # Downloads ALL artifacts matching this pattern
+          merge-multiple: true # Merges them all into ./dist
+          # This action will find artifacts from other workflow runs in this repo
+          
+      - name: Check downloaded artifacts
+        run: |
+          echo "Downloaded artifacts. Merged structure:"
+          ls -R ./dist
+          echo "Checking for empty dist..."
+          if [ -z "$(ls -A ./dist)" ]; then
+            echo "::error:: No artifacts found. Aborting deploy."
+            exit 1
+          fi
+
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
+        with:
+          path: 'static_assets' # Checkout to a separate dir
+          
+      - name: Create repository index pages
+        run: |
+          # --- Copy PWA assets ---
+          if [ -d "static_assets/fav" ]; then cp -r static_assets/fav ./dist/; fi
+          
+          # --- Create File Browser Pages ---
+          find ./dist -type d -exec bash -c '
+            cd "$0"
+            [ -f "index.html" ] && exit 0
+            
+            echo "<!DOCTYPE html><html><head><title>Index of $(pwd)</title>" > index.html
+            echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" >> index.html
+            echo "<style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>" >> index.html
+            echo "</head><body><h1>Index of $(pwd | sed "s|/home/runner/work/[^/]+/[^/]+/dist||")</h1><hr><pre><a href=\"../\">../</a>" >> index.html
+
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            
+            echo "</pre><hr></body></html>" >> index.html
+          ' {} \;
+
+          # --- Create Main Landing Page ---
+          PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
+          if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
+          cd ./dist
+          BROWSE_HTML=""
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
+            version_name=$(basename "$dir")
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/snapshots/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
+          done
+          cd ..
+          
+          if [ -f "static_assets/index.html" ]; then
+            cp static_assets/index.html ./dist/
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+          fi
+          
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'

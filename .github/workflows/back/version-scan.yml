@@ -1,0 +1,65 @@
+# This workflow periodically scans for new package versions using nvchecker.
+# If a new version is found, it updates the 'cur_ver.json' file and commits the change.
+name: 0. Scan for All Updates
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # every day at 2:00 AM (UTC+8)
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check For New Versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install nvchecker and jq
+        run: |
+          pip3 install nvchecker
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Use a PAT to allow the commit step to trigger other workflows
+          token: ${{ secrets.PAT }}
+
+      - name: Compare versions and update file
+        id: compare_version
+        run: |
+          # Run nvchecker to check for new versions
+          nvchecker -c nvchecker.toml
+          
+          # Run nvcmp to see if there are any actual changes.
+          # It will exit with status 4 if there are updates.
+          vers=$(nvcmp -c nvchecker.toml --exit-status -aj) || echo "ret=$?" >> $GITHUB_OUTPUT
+          
+          # If there were updates, write the new versions to cur_ver.json
+          if [ $? -eq 4 ]; then
+            echo "New versions found. Updating cur_ver.json..."
+            nvtake -c nvchecker.toml --all
+            
+            # Generate a dynamic summary of all changes for the commit message
+            summary=$(echo "$vers" | jq -r 'map("  - \(.name): \(.oldver) -> \(.newver)") | .[]')
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo "$summary" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "All packages and sources are up-to-date."
+          fi
+
+      - name: Commit new version file
+        if: steps.compare_version.outputs.ret == 4
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: |
+            chore: Bump versions
+
+            Automatically updated by version-scan workflow.
+
+            Changes:
+            ${{ steps.compare_version.outputs.summary }}

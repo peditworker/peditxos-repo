@@ -1,0 +1,81 @@
+name: Build Test (Serverless)
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target architecture"
+        required: true
+        default: x86_64
+      sdk_version:
+        description: "SDK version"
+        required: true
+        default: main
+      golang_commit:
+        description: "Golang version"
+        default: master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          swap-storage: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get build path
+        id: get_build_path
+        run: |
+          REF=${{ github.event.inputs.sdk_version }}
+          if [[ $REF == openwrt-* ]]; then
+            VERSION=${REF//openwrt-/}
+            pkg=releases/packages-$VERSION
+            log=releases/faillogs-$VERSION
+          else
+            pkg=snapshots/packages
+            log=snapshots/faillogs
+          fi
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+          echo "log=$log" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ github.event.inputs.arch }}-${{ github.event.inputs.sdk_version }}
+          EXTRA_FEEDS: >-
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages;main
+            src-git|passwall_luci|https://github.com/xiaorouji/openwrt-passwall;main
+            src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2;main
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          V: s
+          GOLANG_COMMIT: ${{ github.event.inputs.golang_commit }}
+
+      - name: Update Repository Folder
+        run: |
+          PKG_DIR="packages/${{ steps.get_build_path.outputs.pkg }}/${{ github.event.inputs.arch }}"
+          mkdir -p "$PKG_DIR"
+          
+          # Copy built packages
+          find bin/packages/${{ github.event.inputs.arch }}/ -name "passwall*" -exec cp {} "$PKG_DIR/" \;
+          
+          # Git Commit and Push
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git pull origin ${{ github.ref_name }} --rebase
+          
+          git add "packages/"
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Manual Test: ${{ github.event.inputs.arch }} (${{ github.event.inputs.sdk_version }})"
+            git push origin ${{ github.ref_name }}
+          fi

@@ -1,0 +1,408 @@
+# ======================================================================================
+# FINAL, STABLE - OpenWrt Package Builder - SDK-Based Method
+#
+# This workflow uses a robust, multi-job architecture as requested.
+# Matrix generation and builds are separated by OpenWrt version for maximum stability.
+# All crucial toolchain overrides and the VERIFIED deploy logic are included.
+# ======================================================================================
+
+name: Build and Deploy OpenWrt Packages (SDK Method)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
+  push:
+    paths:
+      - 'cur_ver.json'
+
+jobs:
+  # --- Stage 1: Generate Matrices for each version independently ---
+  generate_matrix_main:
+    name: Generate Matrix for main
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'main' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"main"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  generate_matrix_2410:
+    name: Generate Matrix for 24.10
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-24.10' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-24.10"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  generate_matrix_2305:
+    name: Generate Matrix for 23.05
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-23.05' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-23.05"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  generate_matrix_2203:
+    name: Generate Matrix for 22.03
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-22.03' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-22.03"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  generate_matrix_2102:
+    name: Generate Matrix for 21.02
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: openwrt/openwrt, ref: 'openwrt-21.02' }
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"openwrt-21.02"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  # --- Stage 2: Build jobs, one for each OpenWrt version ---
+  build_main:
+    name: Build for main
+    needs: generate_matrix_main
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_main.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - name: Organize packages for artifact upload
+        run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-main-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+
+  build_2410:
+    name: Build for 24.10
+    needs: generate_matrix_2410
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2410.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
+            src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2410-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+
+  build_2305:
+    name: Build for 23.05
+    needs: generate_matrix_2305
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2305.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
+            src-git|passwall2|https://github.com/xiaorouji/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2305-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+
+  build_2203:
+    name: Build for 22.03
+    needs: generate_matrix_2203
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2203.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2203-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+
+  build_2102:
+    name: Build for 21.02
+    needs: generate_matrix_2102
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix_2102.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - run: |
+          mkdir -p "dist/${{ matrix.ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ matrix.ref }}/${{ matrix.arch }}/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-2102-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+
+  # --- Stage 3: Deploy all packages ---
+  deploy:
+    name: Deploy All Packages
+    needs: [build_main, build_2410, build_2305, build_2203, build_2102]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+          pattern: packages-*
+          merge-multiple: true
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
+      - name: Create repository index pages
+        run: |
+          # --- Copy PWA assets ---
+          if [ -d "fav" ]; then cp -r fav ./dist/; fi
+          
+          # --- Create File Browser Pages ---
+          find ./dist -type d -exec bash -c '
+            cd "$0"
+            cat > index.html << EOL
+          <!DOCTYPE html><html><head><title>Index of $(pwd)</title>
+          <style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>
+          </head><body><h1>Index of $(pwd | sed "s|/home/runner/work/peditxos-repo/peditxos-repo/dist||")</h1><hr><pre><a href="../">../</a>
+          EOL
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            echo "</pre><hr></body></html>" >> index.html
+          ' {} \;
+
+          # --- Create Main Landing Page ---
+          PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
+          if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
+          cd ./dist
+          BROWSE_HTML=""
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
+            version_name=$(basename "$dir")
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
+          done
+          cd ..
+          
+          if [ -f "index.html" ]; then
+            cp index.html ./dist/
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+          fi
+          
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
+

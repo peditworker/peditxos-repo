@@ -1,0 +1,129 @@
+# ======================================================================================
+# REUSABLE BUILDER WORKFLOW
+#
+# This file is a "template" called by the main "build-packages.yml" workflow.
+# It contains the logic for:
+# 1. Generating the matrix for ONE version.
+# 2. Building all packages for that ONE version.
+# 3. Uploading the resulting packages as an artifact.
+#
+# It is defined with "on: workflow_call" and accepts inputs.
+# ======================================================================================
+
+name: Reusable OpenWrt Builder
+
+on:
+  workflow_call:
+    inputs:
+      version_name:
+        description: 'The display name and artifact name (e.g., "main", "22.03")'
+        required: true
+        type: string
+      openwrt_ref:
+        description: 'The git ref in openwrt/openwrt (e.g., "main", "openwrt-22.03")'
+        required: true
+        type: string
+      modern_toolchain:
+        description: 'Whether to apply disk cleanup and modern toolchains (true/false)'
+        required: true
+        type: boolean
+    secrets:
+      SIGN_PRIV_KEY:
+        required: false
+
+jobs:
+  # --- Stage 1: Generate Matrix ---
+  generate_matrix:
+    name: Generate Matrix for ${{ inputs.version_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      sdks: ${{ steps.find_targets.outputs.sdks }}
+    steps:
+      - uses: actions/checkout@v4
+        # === FIX: Corrected YAML syntax for 'with' block ===
+        with:
+          repository: openwrt/openwrt
+          ref: ${{ inputs.openwrt_ref }}
+          
+      - id: find_targets
+        run: |
+          JSON='['; FIRST=1
+          while read -r line; do
+            [ -z "$line" ] && continue
+            ARCH=$(echo "$line" | cut -d " " -f 1)
+            [[ $FIRST -ne 1 ]] && JSON="$JSON"','
+            FIRST=0; JSON="$JSON"'{"arch":"'"$ARCH"'","ref":"${{ inputs.openwrt_ref }}"}'
+          done <<< $(perl ./scripts/dump-target-info.pl architectures 2>/dev/null)
+          JSON="$JSON"']'
+          echo "sdks=$JSON" >> "$GITHUB_OUTPUT"
+
+  # --- Stage 2: Build Packages ---
+  build:
+    name: Build for ${{ inputs.version_name }}
+    needs: generate_matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_matrix.outputs.sdks) }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Free up disk space (if modern)
+        if: ${{ inputs.modern_toolchain == true }}
+        run: |
+          echo "=== Freeing up disk space for MODERN build ==="
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+          
+      - run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      
+      - id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $(nvcmp -c nvchecker.toml -aj) >> $GITHUB_OUTPUT
+          
+      - run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+          
+      - name: Override Go and Rust toolchains (if modern)
+        if: ${{ inputs.modern_toolchain == true }}
+        run: |
+          echo "=== Overriding Go/Rust toolchains for MODERN build ==="
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+          
+      - uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.ref }}
+          # Use version pinning ONLY for modern toolchains
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages${{ inputs.modern_toolchain == true && format('^{0}', steps.ver.outputs.packages) || '' }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall${{ inputs.modern_toolchain == true && format('^{0}', steps.ver.outputs.passwall) || '' }}
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2${{ inputs.modern_toolchain == true && format('^{0}', steps.ver.outputs.passwall2) || '' }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m n # Fail build if any package fails
+          
+      - name: Organize packages for artifact upload
+        run: |
+          # We use "inputs.openwrt_ref" here for the directory structure
+          mkdir -p "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}"
+          find bin/packages/${{ matrix.arch }} -type f -name "*.ipk" -exec cp -t "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}/" {} +
+          find bin/packages/${{ matrix.arch }} -maxdepth 1 -name "Packages*" -exec cp -t "dist/${{ inputs.openwrt_ref }}/${{ matrix.arch }}/" {} +
+          # === FIX: Corrected typo from key-bool.pub to key-build.pub ===
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          # Use a name specific to this version
+          name: packages-${{ inputs.version_name }}-${{ matrix.arch }}
+          path: dist
+          retention-days: 1
+

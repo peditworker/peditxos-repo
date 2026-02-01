@@ -1,0 +1,109 @@
+# ======================================================================================
+# DEPLOYMENT TEST WORKFLOW
+#
+# This is a fast, standalone workflow to test ONLY the deploy step.
+# It simulates the build output and then runs the final deploy and page generation logic.
+# Run this manually to verify the deploy process in under 1 minute.
+# ======================================================================================
+
+name: (Test) Deploy Step Only
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test_deployment:
+    name: Verify Deploy Logic
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository to get static assets
+        uses: actions/checkout@v4
+
+      - name: Create fake build artifacts for testing
+        run: |
+          # --- Create simulated IPK structure (133 total jobs) ---
+          mkdir -p dist/openwrt-24.10/aarch64_cortex-a72
+          mkdir -p dist/openwrt-23.05/x86_64
+          mkdir -p dist/main/arm_cortex-a9
+          mkdir -p dist/openwrt-22.03/mips_24kc
+          
+          # Simulate individual artifact folders merged together
+          echo "Simulating merge of 4 build parts..."
+          mkdir -p matrix-artifacts
+          
+          # Simulate packages-* artifacts (Normally uploaded by build jobs)
+          for arch in x86_64 aarch64_cortex-a72; do
+            # Create files and the Packages index files for the final step to find
+            mkdir -p matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch
+            touch matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch/package-A-$arch.ipk
+            touch matrix-artifacts/packages-part1/dist/openwrt-24.10/$arch/Packages.gz
+          done
+          
+          # Create the merged directory before copying
+          mkdir -p dist-merged
+          
+          # Merge these simulated artifacts into the final working directory
+          find matrix-artifacts -type f -exec cp --parents {} ./dist-merged/ \;
+          
+          # Create final public key (which is normally created during the build but we simulate it here)
+          echo "TEST_KEY_CONTENT" > ./dist-merged/key-build.pub
+          
+          # Copy static files needed for the deploy script
+          if [ -d "fav" ]; then cp -r fav ./dist-merged/; fi
+          if [ -f "index.html" ]; then cp index.html ./dist-merged/index.html; fi
+          
+          # Rename for deploy
+          mv dist-merged dist
+
+      - name: Create repository index pages (Actual Deploy Logic)
+        run: |
+          echo "Running the exact same deploy script..."
+          # --- Create File Browser Pages ---
+          find ./dist -type d -exec bash -c '
+            cd "$0"
+            cat > index.html << EOL
+          <!DOCTYPE html><html><head><title>Index of $(pwd)</title>
+          <style>body { background-color: #0a0a14; color: #e0e0e0; font-family: monospace; padding: 2em; } a { color: #00f6ff; text-decoration: none; } a:hover { text-decoration: underline; }</style>
+          </head><body><h1>Index of $(pwd | sed "s|/home/runner/work/peditxos-repo/peditxos-repo/dist||")</h1><hr><pre><a href="../">../</a>
+          EOL
+            for item in *; do
+              if [ "$item" != "index.html" ]; then
+                if [ -d "$item" ]; then echo "<a href=\"$item/\">$item/</a>" >> index.html;
+                else echo "<a href=\"$item\">$item</a>" >> index.html; fi
+              fi
+            done
+            echo "</pre><hr></body></html>" >> index.html
+          ' {} \;
+
+          # --- Create Main Landing Page ---
+          PUB_KEY_PATH=$(find ./dist -name 'key-build.pub' | head -n 1)
+          if [ -n "$PUB_KEY_PATH" ]; then cp "$PUB_KEY_PATH" ./dist/key-build.pub; fi
+
+          cd ./dist
+          BROWSE_HTML=""
+          for dir in $(find . -maxdepth 1 -type d -not -name '.*' -not -name '.' -not -name 'fav' | sort -rV); do
+            version_name=$(basename "$dir")
+            display_name=$(echo "$version_name" | sed 's/openwrt-/OpenWrt /' | sed 's/main/Snapshot (main)/')
+            BROWSE_HTML="${BROWSE_HTML}<li><a href=\"./${version_name}/\" class=\"text-neon-cyan hover:underline\">${display_name}</a></li>"
+          done
+          cd ..
+          
+          if [ -f "index.html" ]; then
+            cp index.html ./dist/
+            sed -i 's|<!-- Links will be dynamically inserted here by the build workflow -->|'"$BROWSE_HTML"'|' ./dist/index.html
+          fi
+
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo-test # Pushes to a test branch for safe verification
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
+
+      - name: Final Check
+        run: echo "✅ Deploy test complete. Check the 'repo-test' branch in your peditx/PeDitXOS-Repository."

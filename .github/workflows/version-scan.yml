@@ -1,0 +1,55 @@
+name: Scan openwrt-passwall Version
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # every day at UTC+8 2:00AM
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Setup Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install nvchecker
+        run: pip3 install nvchecker
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Using PAT for cross-account or protected branch pushes if needed
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Compare version
+        id: compare_version
+        run: |
+          nvchecker -c nvchecker.toml
+          # Check for updates and capture exit status
+          vers=$(nvcmp -c nvchecker.toml --exit-status -aj) || ret=$?
+          echo "ret=${ret:-0}" >> $GITHUB_OUTPUT
+          
+          if [ "${ret:-0}" -eq 4 ]; then
+            nvtake -c nvchecker.toml --all
+            # Export new versions for the commit message
+            jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit new version
+        if: steps.compare_version.outputs.ret == '4'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: |
+            chore: bump version
+
+            passwall: ${{ steps.compare_version.outputs.passwall }}
+            passwall2: ${{ steps.compare_version.outputs.passwall2 }}
+            packages: ${{ steps.compare_version.outputs.packages }}
+          file_pattern: 'cur_ver.json'
+          branch: ${{ github.ref_name }}

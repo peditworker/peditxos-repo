@@ -1,0 +1,67 @@
+# ======================================================================================
+# SINGLE CPU TEST BUILD WORKFLOW
+#
+# This workflow runs a full build cycle for ONLY ONE CPU (x86_64/main) to quickly
+# test toolchain overrides, feed fetching, and packaging logic end-to-end.
+# This ensures stability before running the full matrix.
+# ======================================================================================
+
+name: (Test) Single CPU Full Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  single_build_test:
+    name: Build x86_64 for main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pip jq && pip3 install nvchecker
+      - name: Retrieve Latest Versions
+        id: ver
+        run: |
+          if [ ! -f cur_ver.json ]; then echo "{}" > cur_ver.json; fi
+          # Use a simple dummy run as we only care if nvchecker runs, not its full output validity
+          vers=$(nvcmp -c nvchecker.toml -aj)
+          jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
+      - name: Manually clone theme packages
+        run: |
+          mkdir -p package
+          git clone --depth 1 https://github.com/peditx/luci-app-themeswitch.git package/luci-app-themeswitch
+          git clone --depth 1 https://github.com/peditx/luci-theme-peditx.git package/luci-theme-peditx
+          git clone --depth 1 https://github.com/peditx/luci-theme-carbonpx.git package/luci-theme-carbonpx
+      - name: Override Go and Rust toolchains to latest
+        run: |
+          echo "GOLANG_COMMIT=master" >> $GITHUB_ENV
+          echo "RUST_COMMIT=master" >> $GITHUB_ENV
+      - name: Build Packages (x86_64/main)
+        uses: moetayuko/gh-action-sdk@main
+        env:
+          ARCH: x86_64-main
+          EXTRA_FEEDS: |
+            src-git|passwall_packages|https://github.com/xiaorouji/openwrt-passwall-packages^${{ steps.ver.outputs.packages }}
+            src-git|passwall_luci|https://github.com/peditx/openwrt-passwall^${{ steps.ver.outputs.passwall }}
+            src-git|passwall2|https://github.com/peditx/openwrt-passwall2^${{ steps.ver.outputs.passwall2 }}
+          KEY_BUILD: ${{ secrets.SIGN_PRIV_KEY }}
+          IGNORE_ERRORS: n m y
+      - name: Organize packages for artifact upload
+        run: |
+          # The SDK creates bin/packages/x86_64/
+          mkdir -p "dist/main/x86_64"
+          find bin/packages/x86_64 -type f -name "*.ipk" -exec cp -t "dist/main/x86_64/" {} +
+          find bin/packages/x86_64 -maxdepth 1 -name "Packages*" -exec cp -t "dist/main/x86_64/" {} +
+          if [ -f "key-build.pub" ]; then cp key-build.pub "dist/"; fi
+      - name: Push updates to repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DEPLOY_KEY }}
+          external_repository: peditx/PeDitXOS-Repository
+          publish_dir: ./dist
+          publish_branch: repo-test # Publishes to a safe test branch
+          force_orphan: true
+          cname: downloads.peditxos.ir
+          user_name: 'peditworker'
+          user_email: 'pedram.ale@me.com'
