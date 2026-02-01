@@ -32,11 +32,18 @@ jobs:
       - name: Install nvchecker
         run: pip3 install nvchecker
 
-      - name: Checkout Target Repo
+      - name: Checkout Worker Repo (Local)
+        uses: actions/checkout@v4
+        with:
+          # This keeps your .toml and .json files available
+          path: .
+
+      - name: Checkout Target Repo (External)
         uses: actions/checkout@v4
         with:
           repository: peditx/PeDitXOS-Repository
           token: ${{ secrets.PAT }}
+          path: target-repo
           fetch-depth: 0
 
       - name: Get build path
@@ -54,6 +61,7 @@ jobs:
       - name: Retrieve Version
         id: ver
         run: |
+          # Now nvchecker.toml is found because we checked out the worker repo to '.'
           vers=$(nvcmp -c nvchecker.toml -aj)
           jq -cr 'map("\(.name)=\(.newver)") | .[]' <<< $vers >> $GITHUB_OUTPUT
 
@@ -75,16 +83,20 @@ jobs:
 
       - name: Update Target Repository Folder
         run: |
-          PKG_DIR="packages/${{ steps.get_build_path.outputs.pkg }}/${{ github.event.inputs.arch }}"
+          # Path to target-repo we checked out earlier
+          TARGET_DIR="target-repo"
+          PKG_DIR="$TARGET_DIR/packages/${{ steps.get_build_path.outputs.pkg }}/${{ github.event.inputs.arch }}"
+          
           mkdir -p "$PKG_DIR"
           
-          # Clean old IPKs for this arch
+          # Clean old IPKs for this arch in the target repo
           rm -f "$PKG_DIR"/*.ipk
           
-          # Copy new IPKs
+          # Copy new IPKs from build directory to target repo
           find bin/packages/${{ github.event.inputs.arch }}/ -name "passwall*" -exec cp {} "$PKG_DIR/" \;
           
-          # Git Commit and Push to Target Repo
+          # Git operations inside the target-repo folder
+          cd "$TARGET_DIR"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
